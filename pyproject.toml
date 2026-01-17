@@ -1,0 +1,75 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "openadapt-telemetry"
+version = "0.1.0"
+description = "Unified telemetry and error tracking for OpenAdapt packages"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+    {name = "Richard Abrich", email = "richard@openadapt.ai"}
+]
+maintainers = [
+    {name = "OpenAdaptAI", email = "info@openadapt.ai"}
+]
+keywords = [
+    "telemetry",
+    "error-tracking",
+    "sentry",
+    "glitchtip",
+    "openadapt",
+    "privacy",
+    "observability",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Monitoring",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "sentry-sdk>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0",
+]
+all = [
+    "openadapt-telemetry[dev]",
+]
+
+[project.urls]
+Homepage = "https://github.com/OpenAdaptAI/openadapt-telemetry"
+Repository = "https://github.com/OpenAdaptAI/openadapt-telemetry"
+Documentation = "https://github.com/OpenAdaptAI/openadapt-telemetry#readme"
+Issues = "https://github.com/OpenAdaptAI/openadapt-telemetry/issues"
+Changelog = "https://github.com/OpenAdaptAI/openadapt-telemetry/releases"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openadapt_telemetry"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: marks tests as unit tests",
+    "integration: marks tests as integration tests",
+]
