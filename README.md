@@ -1,5 +1,13 @@
 # openadapt-telemetry
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
+
+<!-- PyPI badges (uncomment once package is published)
+[![PyPI version](https://img.shields.io/pypi/v/openadapt-telemetry.svg)](https://pypi.org/project/openadapt-telemetry/)
+[![Downloads](https://img.shields.io/pypi/dm/openadapt-telemetry.svg)](https://pypi.org/project/openadapt-telemetry/)
+-->
+
 Unified telemetry and error tracking for OpenAdapt packages.
 
 ## Features
