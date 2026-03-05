@@ -1,6 +1,5 @@
 """Tests for privacy filtering and PII scrubbing."""
 
-import pytest
 
 from openadapt_telemetry.privacy import (
     is_sensitive_key,

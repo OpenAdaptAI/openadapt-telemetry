@@ -1,10 +1,7 @@
 """Tests for telemetry client."""
 
 import os
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from openadapt_telemetry.client import (
     TelemetryClient,

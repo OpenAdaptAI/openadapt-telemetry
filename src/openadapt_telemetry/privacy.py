@@ -12,7 +12,6 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Set
 
-
 # Sensitive field names that should have their values redacted
 PII_DENYLIST: Set[str] = {
     # Authentication

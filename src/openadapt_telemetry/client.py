@@ -10,13 +10,12 @@ import os
 import platform
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 import sentry_sdk
-from sentry_sdk.types import Event, Hint
 
 from .config import TelemetryConfig, load_config
-from .privacy import create_before_send_filter, sanitize_path
+from .privacy import create_before_send_filter
 
 
 def is_running_from_executable() -> bool:

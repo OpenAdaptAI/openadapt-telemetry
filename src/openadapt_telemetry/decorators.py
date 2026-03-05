@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import functools
 import time
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Callable, Optional, TypeVar
 
 import sentry_sdk
 
@@ -57,7 +57,7 @@ def track_performance(
                     result = func(*args, **kwargs)
                     transaction.set_status("ok")
                     return result
-                except Exception as e:
+                except Exception:
                     transaction.set_status("internal_error")
                     raise
                 finally:
