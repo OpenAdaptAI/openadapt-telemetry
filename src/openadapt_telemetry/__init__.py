@@ -80,6 +80,12 @@ from openadapt_telemetry.events import (
     track_shutdown,
     track_startup,
 )
+from openadapt_telemetry.posthog import (
+    capture_event as capture_posthog_event,
+)
+from openadapt_telemetry.posthog import (
+    capture_usage_event,
+)
 from openadapt_telemetry.privacy import (
     PII_DENYLIST,
     create_before_send_filter,
@@ -132,4 +138,7 @@ __all__ = [
     "track_command",
     "track_operation",
     "track_error",
+    # PostHog usage events
+    "capture_posthog_event",
+    "capture_usage_event",
 ]

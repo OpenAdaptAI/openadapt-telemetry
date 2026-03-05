@@ -73,3 +73,16 @@ markers = [
     "unit: marks tests as unit tests",
     "integration: marks tests as integration tests",
 ]
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version", "src/openadapt_telemetry/__init__.py:__version__"]
+commit_message = "chore: release {version}"
+major_on_zero = false
+
+[tool.semantic_release.branches.main]
+match = "main"
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = ["build", "chore", "ci", "docs", "feat", "fix", "perf", "refactor", "style", "test"]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf"]
