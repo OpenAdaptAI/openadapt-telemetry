@@ -75,7 +75,8 @@ markers = [
 ]
 
 [tool.semantic_release]
-version_toml = ["pyproject.toml:project.version", "src/openadapt_telemetry/__init__.py:__version__"]
+version_toml = ["pyproject.toml:project.version"]
+version_variables = ["src/openadapt_telemetry/__init__.py:__version__"]
 commit_message = "chore: release {version}"
 major_on_zero = false
 
