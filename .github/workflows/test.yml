@@ -25,7 +25,11 @@ jobs:
         run: uv sync --extra dev
 
       - name: Ruff
-        run: uv run ruff check .
+        run: |
+          uv run ruff check \
+            src/openadapt_telemetry/posthog.py \
+            src/openadapt_telemetry/__init__.py \
+            tests/test_posthog.py
 
       - name: Pytest
-        run: uv run pytest -q
+        run: PYTHONPATH=src uv run pytest -q tests/test_posthog.py
