@@ -9,7 +9,6 @@ from unittest.mock import patch
 import pytest
 
 from openadapt_telemetry.config import (
-    CONFIG_FILE,
     TelemetryConfig,
     _get_env_config,
     _load_config_file,
