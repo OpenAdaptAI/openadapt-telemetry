@@ -1,10 +1,7 @@
 """Tests for telemetry client."""
 
 import os
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from openadapt_telemetry.client import (
     TelemetryClient,
@@ -233,6 +230,22 @@ class TestTelemetryClient:
             client.set_tag("test_key", "test_value")
 
             mock_sentry.set_tag.assert_called_with("test_key", "test_value")
+
+    @patch("openadapt_telemetry.client.sentry_sdk")
+    def test_set_user_hashes_identifier_and_drops_extra_fields(self, mock_sentry):
+        """set_user should only send an anonymized ID."""
+        with patch.dict(os.environ, {"DO_NOT_TRACK": ""}, clear=False):
+            TelemetryClient.reset_instance()
+            client = TelemetryClient.get_instance()
+            client.initialize(dsn="https://test@example.com/1")
+
+            client.set_user("user@example.com", email="user@example.com", name="User")
+
+            mock_sentry.set_user.assert_called_once()
+            payload = mock_sentry.set_user.call_args.args[0]
+            assert set(payload.keys()) == {"id"}
+            assert payload["id"].startswith("anon:")
+            assert payload["id"] != "user@example.com"
 
     @patch("openadapt_telemetry.client.sentry_sdk")
     def test_add_breadcrumb(self, mock_sentry):

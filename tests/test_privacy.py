@@ -1,8 +1,9 @@
 """Tests for privacy filtering and PII scrubbing."""
 
-import pytest
 
 from openadapt_telemetry.privacy import (
+    anonymize_identifier,
+    create_before_send_filter,
     is_sensitive_key,
     sanitize_path,
     scrub_dict,
@@ -274,3 +275,37 @@ class TestScrubExceptionData:
         frame = exception_data["values"][0]["stacktrace"]["frames"][0]
         assert frame["vars"]["password"] == "[REDACTED]"
         assert frame["vars"]["username"] == "john"
+
+
+class TestAnonymizeIdentifier:
+    """Tests for deterministic identifier anonymization."""
+
+    def test_stable_hash(self):
+        first = anonymize_identifier("user@example.com")
+        second = anonymize_identifier("user@example.com")
+        assert first == second
+        assert first.startswith("anon:")
+        assert first != "user@example.com"
+
+    def test_empty_value(self):
+        assert anonymize_identifier("") == "anon:unknown"
+
+
+class TestBeforeSendUserScrubbing:
+    """Tests for user context anonymization in before_send."""
+
+    def test_only_anonymous_user_id_remains(self):
+        before_send = create_before_send_filter()
+        event = {
+            "user": {
+                "id": "user@example.com",
+                "email": "user@example.com",
+                "username": "alice",
+            },
+        }
+        sanitized = before_send(event, hint={})
+        assert sanitized is not None
+        assert "user" in sanitized
+        assert set(sanitized["user"].keys()) == {"id"}
+        assert sanitized["user"]["id"].startswith("anon:")
+        assert sanitized["user"]["id"] != "user@example.com"

@@ -10,13 +10,12 @@ import os
 import platform
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 import sentry_sdk
-from sentry_sdk.types import Event, Hint
 
 from .config import TelemetryConfig, load_config
-from .privacy import create_before_send_filter, sanitize_path
+from .privacy import anonymize_identifier, create_before_send_filter
 
 
 def is_running_from_executable() -> bool:
@@ -129,20 +128,13 @@ class TelemetryClient:
     def _check_enabled(self) -> bool:
         """Check if telemetry should be enabled.
 
-        Checks environment variables for opt-out signals.
+        Uses merged config with defaults/env/file precedence.
 
         Returns:
             True if telemetry should be enabled.
         """
-        # Universal opt-out (DO_NOT_TRACK standard)
-        if os.getenv("DO_NOT_TRACK", "").lower() in ("1", "true"):
-            return False
-
-        # Package-specific opt-out
-        if os.getenv("OPENADAPT_TELEMETRY_ENABLED", "").lower() in ("false", "0", "no"):
-            return False
-
-        return True
+        self._config = load_config()
+        return bool(self._config.enabled)
 
     @property
     def enabled(self) -> bool:
@@ -188,9 +180,6 @@ class TelemetryClient:
         Returns:
             True if initialization succeeded, False if disabled or already initialized.
         """
-        if not self._enabled:
-            return False
-
         if self._initialized and not kwargs.get("force", False):
             return True
 
@@ -202,6 +191,10 @@ class TelemetryClient:
             self._config.dsn = dsn
         if environment:
             self._config.environment = environment
+        self._enabled = bool(self._config.enabled)
+
+        if not self._enabled:
+            return False
 
         # Skip if no DSN configured
         if not self._config.dsn:
@@ -315,12 +308,13 @@ class TelemetryClient:
         Note: Only sets anonymous user ID. Never set email, name, or other PII.
 
         Args:
-            user_id: Anonymous user identifier.
-            **kwargs: Additional user properties (id only recommended).
+            user_id: User identifier to hash before sending.
+            **kwargs: Ignored. Additional user fields are dropped.
         """
         if not self._enabled or not self._initialized:
             return
-        sentry_sdk.set_user({"id": user_id, **kwargs})
+        _ = kwargs
+        sentry_sdk.set_user({"id": anonymize_identifier(user_id)})
 
     def set_tag(self, key: str, value: str) -> None:
         """Set a custom tag for all subsequent events.

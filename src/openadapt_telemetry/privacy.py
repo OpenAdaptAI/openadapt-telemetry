@@ -9,9 +9,9 @@ before sending telemetry data. It includes:
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any, Dict, List, Optional, Set
-
 
 # Sensitive field names that should have their values redacted
 PII_DENYLIST: Set[str] = {
@@ -158,6 +158,15 @@ def scrub_string(value: str) -> str:
     return value
 
 
+def anonymize_identifier(value: str, prefix: str = "anon") -> str:
+    """Deterministically anonymize an identifier using SHA-256."""
+    normalized = str(value or "").strip()
+    if not normalized:
+        return f"{prefix}:unknown"
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+    return f"{prefix}:{digest}"
+
+
 def scrub_dict(
     data: Dict[str, Any],
     deep: bool = True,
@@ -295,6 +304,11 @@ def create_before_send_filter():
                     request["data"] = scrub_dict(request["data"], deep=True, scrub_values=True)
                 elif isinstance(request["data"], str):
                     request["data"] = scrub_string(request["data"])
+
+        # Keep only anonymous user IDs (drop all other user attributes).
+        if "user" in event and isinstance(event["user"], dict):
+            user_id = event["user"].get("id")
+            event["user"] = {"id": anonymize_identifier(str(user_id))} if user_id else {}
 
         return event
 
