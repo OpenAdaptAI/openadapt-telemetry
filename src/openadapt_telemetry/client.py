@@ -59,9 +59,8 @@ def is_internal_user() -> bool:
     Uses multiple heuristics to detect internal/developer usage:
     1. Explicit OPENADAPT_INTERNAL environment variable
     2. OPENADAPT_DEV environment variable
-    3. Not running from frozen executable
-    4. Git repository present in current directory
-    5. CI environment detected
+    3. Git repository present in current directory
+    4. CI environment detected
 
     Returns:
         True if this appears to be internal usage.
@@ -74,15 +73,11 @@ def is_internal_user() -> bool:
     if os.getenv("OPENADAPT_DEV", "").lower() in ("true", "1", "yes"):
         return True
 
-    # Method 3: Not running from executable (indicates dev mode)
-    if not is_running_from_executable():
-        return True
-
-    # Method 4: Git repository present (development checkout)
+    # Method 3: Git repository present (development checkout)
     if Path(".git").exists() or Path("../.git").exists():
         return True
 
-    # Method 5: CI/CD environment
+    # Method 4: CI/CD environment
     if is_ci_environment():
         return True
 

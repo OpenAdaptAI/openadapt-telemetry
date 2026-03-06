@@ -96,6 +96,13 @@ class TestIsInternalUser:
         with patch.dict(os.environ, {"CI": "true"}, clear=False):
             assert is_internal_user() is True
 
+    @patch("openadapt_telemetry.client.Path.exists", return_value=False)
+    @patch("openadapt_telemetry.client.is_ci_environment", return_value=False)
+    def test_no_signals_indicates_external(self, _mock_ci, _mock_exists):
+        """Without explicit internal signals, usage should be treated as external."""
+        with patch.dict(os.environ, {"OPENADAPT_INTERNAL": "", "OPENADAPT_DEV": ""}, clear=False):
+            assert is_internal_user() is False
+
 
 class TestTelemetryClient:
     """Tests for TelemetryClient class."""
