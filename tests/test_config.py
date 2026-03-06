@@ -9,7 +9,6 @@ from unittest.mock import patch
 import pytest
 
 from openadapt_telemetry.config import (
-    CONFIG_FILE,
     TelemetryConfig,
     _get_env_config,
     _load_config_file,
@@ -108,6 +107,16 @@ class TestEnvConfig:
     def test_explicit_disable(self):
         """OPENADAPT_TELEMETRY_ENABLED=false should disable."""
         with patch.dict(os.environ, {"OPENADAPT_TELEMETRY_ENABLED": "false"}, clear=False):
+            config = _get_env_config()
+            assert config.get("enabled") is False
+
+    def test_do_not_track_overrides_explicit_enable(self):
+        """DO_NOT_TRACK should disable telemetry even if explicitly enabled."""
+        with patch.dict(
+            os.environ,
+            {"DO_NOT_TRACK": "1", "OPENADAPT_TELEMETRY_ENABLED": "true"},
+            clear=False,
+        ):
             config = _get_env_config()
             assert config.get("enabled") is False
 

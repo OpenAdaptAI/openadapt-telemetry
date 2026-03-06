@@ -290,6 +290,10 @@ class TestAnonymizeIdentifier:
     def test_empty_value(self):
         assert anonymize_identifier("") == "anon:unknown"
 
+    def test_already_anonymized_id_is_not_rehashed(self):
+        anon_id = anonymize_identifier("user@example.com")
+        assert anonymize_identifier(anon_id) == anon_id
+
 
 class TestBeforeSendUserScrubbing:
     """Tests for user context anonymization in before_send."""

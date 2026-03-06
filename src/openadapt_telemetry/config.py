@@ -82,14 +82,14 @@ def _get_env_config() -> dict[str, Any]:
     """Get configuration from environment variables."""
     config: dict[str, Any] = {}
 
-    # Universal opt-out (DO_NOT_TRACK standard)
-    if os.getenv("DO_NOT_TRACK", "").lower() in ("1", "true"):
-        config["enabled"] = False
-
-    # Package-specific opt-out
+    # Package-specific toggle
     enabled_env = os.getenv("OPENADAPT_TELEMETRY_ENABLED", "")
     if enabled_env:
         config["enabled"] = _parse_bool(enabled_env)
+
+    # Universal opt-out (DO_NOT_TRACK standard) always wins.
+    if os.getenv("DO_NOT_TRACK", "").lower() in ("1", "true"):
+        config["enabled"] = False
 
     # Internal/developer flags
     if os.getenv("OPENADAPT_INTERNAL", "").lower() in ("true", "1", "yes"):

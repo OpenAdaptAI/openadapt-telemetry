@@ -163,6 +163,8 @@ def anonymize_identifier(value: str, prefix: str = "anon") -> str:
     normalized = str(value or "").strip()
     if not normalized:
         return f"{prefix}:unknown"
+    if normalized.startswith(f"{prefix}:"):
+        return normalized
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
     return f"{prefix}:{digest}"
 
