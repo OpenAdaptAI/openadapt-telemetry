@@ -3,6 +3,8 @@
 import os
 from unittest.mock import patch
 
+import pytest
+
 from openadapt_telemetry.client import (
     TelemetryClient,
     get_telemetry,
@@ -188,6 +190,8 @@ class TestTelemetryClient:
             assert result is True
             assert client.initialized is True
             mock_sentry.init.assert_called_once()
+            init_kwargs = mock_sentry.init.call_args.kwargs
+            assert init_kwargs["send_default_pii"] is False
 
     @patch("openadapt_telemetry.client.sentry_sdk")
     def test_capture_exception_when_enabled(self, mock_sentry):
@@ -253,6 +257,54 @@ class TestTelemetryClient:
             assert set(payload.keys()) == {"id"}
             assert payload["id"].startswith("anon:")
             assert payload["id"] != "user@example.com"
+
+    @patch("openadapt_telemetry.client.sentry_sdk")
+    def test_custom_before_send_is_composed_after_privacy_filter(self, mock_sentry):
+        """Custom before_send should run after built-in scrubbing."""
+
+        def custom_before_send(event, hint):
+            event.setdefault("tags", {})["custom"] = "true"
+            return event
+
+        with patch.dict(os.environ, {"DO_NOT_TRACK": ""}, clear=False):
+            TelemetryClient.reset_instance()
+            client = TelemetryClient.get_instance()
+            with pytest.warns(UserWarning, match="Custom before_send is composed after OpenAdapt privacy filtering"):
+                client.initialize(
+                    dsn="https://test@example.com/1",
+                    before_send=custom_before_send,
+                )
+
+            before_send = mock_sentry.init.call_args.kwargs["before_send"]
+            event = {"user": {"id": "user@example.com", "email": "user@example.com"}}
+            output = before_send(event, hint={})
+            assert output is not None
+            assert output["user"]["id"].startswith("anon:")
+            assert "email" not in output["user"]
+            assert output["tags"]["custom"] == "true"
+
+    @patch("openadapt_telemetry.client.sentry_sdk")
+    def test_send_default_pii_override_is_ignored(self, mock_sentry):
+        """send_default_pii should always be enforced to False."""
+        with patch.dict(os.environ, {"DO_NOT_TRACK": ""}, clear=False):
+            TelemetryClient.reset_instance()
+            client = TelemetryClient.get_instance()
+            with pytest.warns(UserWarning, match="Ignoring sentry init override for send_default_pii"):
+                client.initialize(
+                    dsn="https://test@example.com/1",
+                    send_default_pii=True,
+                )
+
+            assert mock_sentry.init.call_args.kwargs["send_default_pii"] is False
+
+    def test_initialize_rejects_non_callable_before_send(self):
+        """Non-callable before_send should raise TypeError."""
+        with patch.dict(os.environ, {"DO_NOT_TRACK": ""}, clear=False):
+            TelemetryClient.reset_instance()
+            client = TelemetryClient.get_instance()
+            with patch("openadapt_telemetry.client.sentry_sdk"):
+                with pytest.raises(TypeError, match="before_send must be callable"):
+                    client.initialize(dsn="https://test@example.com/1", before_send="invalid")
 
     @patch("openadapt_telemetry.client.sentry_sdk")
     def test_add_breadcrumb(self, mock_sentry):

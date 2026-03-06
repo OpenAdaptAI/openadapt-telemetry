@@ -160,6 +160,8 @@ export OPENADAPT_TELEMETRY_ENABLED=false
 - File paths have usernames replaced with `<user>`
 - Sensitive fields (password, token, api_key, etc.) are redacted
 - Email addresses and phone numbers are scrubbed from messages
+- User IDs are hashed before upload (`anon:<hash>`)
+- `send_default_pii` is enforced to `false` by the client
 
 ## Internal Usage Tagging
 
@@ -167,9 +169,8 @@ Internal/developer usage is automatically detected via:
 
 1. `OPENADAPT_INTERNAL=true` environment variable
 2. `OPENADAPT_DEV=true` environment variable
-3. Running from source (not frozen executable)
-4. Git repository present in working directory
-5. CI environment detected (GitHub Actions, GitLab CI, etc.)
+3. Git repository present in working directory
+4. CI environment detected (GitHub Actions, GitLab CI, etc.)
 
 Filter in GlitchTip:
 ```
