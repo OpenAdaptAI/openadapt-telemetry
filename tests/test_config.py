@@ -10,9 +10,12 @@ import pytest
 
 from openadapt_telemetry.config import (
     TelemetryConfig,
+    _generate_anon_salt,
     _get_env_config,
+    _is_valid_anon_salt,
     _load_config_file,
     _parse_bool,
+    get_or_create_anon_salt,
     load_config,
     save_config,
 )
@@ -157,6 +160,12 @@ class TestEnvConfig:
             config = _get_env_config()
             assert "sample_rate" not in config
 
+    def test_anon_salt_env_override(self):
+        """OPENADAPT_TELEMETRY_ANON_SALT should be loaded when set."""
+        with patch.dict(os.environ, {"OPENADAPT_TELEMETRY_ANON_SALT": "x" * 32}, clear=False):
+            config = _get_env_config()
+            assert config.get("anon_salt") == "x" * 32
+
 
 class TestConfigFile:
     """Tests for configuration file loading."""
@@ -249,3 +258,47 @@ class TestSaveConfig:
                     assert loaded.enabled is False
                     assert loaded.environment == "test"
                     assert loaded.sample_rate == 0.5
+
+
+class TestAnonSalt:
+    """Tests for per-install anonymization salt handling."""
+
+    def test_validate_anon_salt(self):
+        assert _is_valid_anon_salt("x" * 32) is True
+        assert _is_valid_anon_salt("short") is False
+        assert _is_valid_anon_salt(None) is False
+
+    def test_generate_anon_salt(self):
+        salt = _generate_anon_salt()
+        assert isinstance(salt, str)
+        assert len(salt) >= 32
+
+    def test_get_or_create_anon_salt_from_env(self):
+        with patch.dict(os.environ, {"OPENADAPT_TELEMETRY_ANON_SALT": "y" * 32}, clear=False):
+            assert get_or_create_anon_salt() == "y" * 32
+
+    def test_get_or_create_anon_salt_persists_when_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "openadapt"
+            config_file = config_dir / "telemetry.json"
+            with patch("openadapt_telemetry.config.CONFIG_DIR", config_dir):
+                with patch("openadapt_telemetry.config.CONFIG_FILE", config_file):
+                    with patch.dict(os.environ, {"OPENADAPT_TELEMETRY_ANON_SALT": ""}, clear=False):
+                        first = get_or_create_anon_salt()
+                        second = get_or_create_anon_salt()
+                        assert first == second
+                        with open(config_file) as f:
+                            data = json.load(f)
+                        assert data["anon_salt"] == first
+
+    def test_get_or_create_anon_salt_recovers_from_corrupt_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "openadapt"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            config_file = config_dir / "telemetry.json"
+            config_file.write_text("{not-valid-json")
+            with patch("openadapt_telemetry.config.CONFIG_DIR", config_dir):
+                with patch("openadapt_telemetry.config.CONFIG_FILE", config_file):
+                    salt = get_or_create_anon_salt()
+                    assert isinstance(salt, str)
+                    assert len(salt) >= 32

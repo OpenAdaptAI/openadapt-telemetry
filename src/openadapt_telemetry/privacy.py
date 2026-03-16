@@ -10,8 +10,12 @@ before sending telemetry data. It includes:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import re
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Set
+
+from .config import get_or_create_anon_salt
 
 # Sensitive field names that should have their values redacted
 PII_DENYLIST: Set[str] = {
@@ -95,6 +99,49 @@ SENSITIVE_PATTERNS = [
     re.compile(r"[A-Za-z0-9+/]{40,}={0,2}"),
 ]
 
+# Whitelisted tags that retain observability value and are safe to keep.
+ALLOWED_OBSERVABILITY_KEYS: Set[str] = {
+    "package",
+    "package_version",
+    "python_version",
+    "os",
+    "os_version",
+    "ci",
+    "internal",
+}
+
+ANON_VERSION = "v2"
+
+
+@lru_cache(maxsize=1)
+def _get_anon_salt_cached() -> str:
+    """Memoize anon salt lookup to avoid repeated filesystem reads."""
+    return get_or_create_anon_salt()
+
+
+def _is_already_anonymized(value: str, prefix: str = "anon") -> bool:
+    """Return True when value already matches anon id formats."""
+    legacy_prefix = f"{prefix}:"
+    return value.startswith(legacy_prefix)
+
+
+def _scrub_top_level_messages(event: Dict[str, Any]) -> None:
+    """Scrub top-level message fields that may contain free-form text."""
+    if isinstance(event.get("message"), str):
+        event["message"] = scrub_string(event["message"])
+    if isinstance(event.get("logentry"), dict):
+        logentry = event["logentry"]
+        if isinstance(logentry.get("message"), str):
+            logentry["message"] = scrub_string(logentry["message"])
+        if isinstance(logentry.get("formatted"), str):
+            logentry["formatted"] = scrub_string(logentry["formatted"])
+
+
+def _scrub_tags(tags: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep allowed tag keys and scrub their values."""
+    filtered = {k: v for k, v in tags.items() if k in ALLOWED_OBSERVABILITY_KEYS}
+    return scrub_dict(filtered, deep=False, scrub_values=True)
+
 
 def sanitize_path(path: str) -> str:
     """Remove username from file paths.
@@ -159,14 +206,20 @@ def scrub_string(value: str) -> str:
 
 
 def anonymize_identifier(value: str, prefix: str = "anon") -> str:
-    """Deterministically anonymize an identifier using SHA-256."""
+    """Deterministically anonymize an identifier using versioned HMAC-SHA256."""
     normalized = str(value or "").strip()
     if not normalized:
-        return f"{prefix}:unknown"
-    if normalized.startswith(f"{prefix}:"):
+        return f"{prefix}:{ANON_VERSION}:unknown"
+    if _is_already_anonymized(normalized, prefix=prefix):
         return normalized
-    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
-    return f"{prefix}:{digest}"
+
+    salt = _get_anon_salt_cached()
+    digest = hmac.new(
+        salt.encode("utf-8"),
+        normalized.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:16]
+    return f"{prefix}:{ANON_VERSION}:{digest}"
 
 
 def scrub_dict(
@@ -270,48 +323,54 @@ def create_before_send_filter():
 
     def before_send(event: Event, hint: Hint) -> Optional[Event]:
         """Filter and sanitize events before sending to Sentry/GlitchTip."""
-        # Scrub exception data
-        if "exception" in event:
-            scrub_exception_data(event["exception"])
+        try:
+            _scrub_top_level_messages(event)
 
-        # Scrub breadcrumbs
-        if "breadcrumbs" in event and "values" in event["breadcrumbs"]:
-            for breadcrumb in event["breadcrumbs"]["values"]:
-                if "message" in breadcrumb and isinstance(breadcrumb["message"], str):
-                    breadcrumb["message"] = scrub_string(breadcrumb["message"])
-                if "data" in breadcrumb and isinstance(breadcrumb["data"], dict):
-                    breadcrumb["data"] = scrub_dict(
-                        breadcrumb["data"], deep=True, scrub_values=True
-                    )
+            # Scrub exception data
+            if "exception" in event:
+                scrub_exception_data(event["exception"])
 
-        # Scrub extra data
-        if "extra" in event and isinstance(event["extra"], dict):
-            event["extra"] = scrub_dict(event["extra"], deep=True, scrub_values=True)
+            # Scrub breadcrumbs
+            if "breadcrumbs" in event and "values" in event["breadcrumbs"]:
+                for breadcrumb in event["breadcrumbs"]["values"]:
+                    if "message" in breadcrumb and isinstance(breadcrumb["message"], str):
+                        breadcrumb["message"] = scrub_string(breadcrumb["message"])
+                    if "data" in breadcrumb and isinstance(breadcrumb["data"], dict):
+                        breadcrumb["data"] = scrub_dict(
+                            breadcrumb["data"], deep=True, scrub_values=True
+                        )
 
-        # Scrub contexts
-        if "contexts" in event and isinstance(event["contexts"], dict):
-            event["contexts"] = scrub_dict(event["contexts"], deep=True, scrub_values=False)
+            # Scrub extra data
+            if "extra" in event and isinstance(event["extra"], dict):
+                event["extra"] = scrub_dict(event["extra"], deep=True, scrub_values=True)
 
-        # Scrub tags
-        if "tags" in event and isinstance(event["tags"], dict):
-            event["tags"] = scrub_dict(event["tags"], deep=False, scrub_values=False)
+            # Scrub contexts
+            if "contexts" in event and isinstance(event["contexts"], dict):
+                event["contexts"] = scrub_dict(event["contexts"], deep=True, scrub_values=True)
 
-        # Scrub request data (if present)
-        if "request" in event:
-            request = event["request"]
-            if "headers" in request:
-                request["headers"] = scrub_dict(request["headers"], deep=False, scrub_values=False)
-            if "data" in request:
-                if isinstance(request["data"], dict):
-                    request["data"] = scrub_dict(request["data"], deep=True, scrub_values=True)
-                elif isinstance(request["data"], str):
-                    request["data"] = scrub_string(request["data"])
+            # Scrub tags (allowlist + scrub values)
+            if "tags" in event and isinstance(event["tags"], dict):
+                event["tags"] = _scrub_tags(event["tags"])
 
-        # Keep only anonymous user IDs (drop all other user attributes).
-        if "user" in event and isinstance(event["user"], dict):
-            user_id = event["user"].get("id")
-            event["user"] = {"id": anonymize_identifier(str(user_id))} if user_id else {}
+            # Scrub request data (if present)
+            if "request" in event:
+                request = event["request"]
+                if "headers" in request:
+                    request["headers"] = scrub_dict(request["headers"], deep=False, scrub_values=True)
+                if "data" in request:
+                    if isinstance(request["data"], dict):
+                        request["data"] = scrub_dict(request["data"], deep=True, scrub_values=True)
+                    elif isinstance(request["data"], str):
+                        request["data"] = scrub_string(request["data"])
 
-        return event
+            # Keep only anonymous user IDs (drop all other user attributes).
+            if "user" in event and isinstance(event["user"], dict):
+                user_id = event["user"].get("id")
+                event["user"] = {"id": anonymize_identifier(str(user_id))} if user_id else {}
+
+            return event
+        except Exception:
+            # Fail closed on privacy filter errors.
+            return None
 
     return before_send

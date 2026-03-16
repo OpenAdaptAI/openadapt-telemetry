@@ -60,11 +60,11 @@ def is_ci_environment() -> bool:
 def is_internal_user() -> bool:
     """Determine if current usage is from internal team.
 
-    Uses multiple heuristics to detect internal/developer usage:
+    Uses multiple signals to detect internal/developer usage:
     1. Explicit OPENADAPT_INTERNAL environment variable
     2. OPENADAPT_DEV environment variable
-    3. Git repository present in current directory
-    4. CI environment detected
+    3. CI environment detected
+    4. Optional git repository heuristic when OPENADAPT_INTERNAL_FROM_GIT=true
 
     Returns:
         True if this appears to be internal usage.
@@ -77,25 +77,26 @@ def is_internal_user() -> bool:
     if os.getenv("OPENADAPT_DEV", "").lower() in ("true", "1", "yes"):
         return True
 
-    # Method 3: Git repository present (development checkout)
-    if Path(".git").exists() or Path("../.git").exists():
-        return True
-
-    # Method 4: CI/CD environment
+    # Method 3: CI/CD environment
     if is_ci_environment():
         return True
+
+    # Method 4: optional git heuristic
+    if os.getenv("OPENADAPT_INTERNAL_FROM_GIT", "").lower() in ("true", "1", "yes"):
+        if Path(".git").exists() or Path("../.git").exists():
+            return True
 
     return False
 
 
 def _compose_before_send(base: BeforeSendFn, extra: BeforeSendFn) -> BeforeSendFn:
-    """Compose custom before_send after privacy filtering."""
+    """Compose custom before_send before final privacy filtering."""
 
     def composed(event: Event, hint: Hint) -> Optional[Event]:
-        sanitized = base(event, hint)
-        if sanitized is None:
+        modified = extra(event, hint)
+        if modified is None:
             return None
-        return extra(sanitized, hint)
+        return base(modified, hint)
 
     return composed
 
@@ -219,7 +220,7 @@ class TelemetryClient:
             if not callable(custom_before_send):
                 raise TypeError("before_send must be callable")
             warnings.warn(
-                "Custom before_send is composed after OpenAdapt privacy filtering and cannot bypass scrubbing.",
+                "Custom before_send runs before OpenAdapt privacy filtering; final payload is always scrubbed.",
                 stacklevel=2,
             )
             before_send = _compose_before_send(base_before_send, custom_before_send)
