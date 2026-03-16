@@ -130,7 +130,13 @@ def _get_env_config() -> dict[str, Any]:
     # Optional override for deterministic anonymization in controlled environments.
     anon_salt = os.getenv("OPENADAPT_TELEMETRY_ANON_SALT")
     if anon_salt:
-        config["anon_salt"] = anon_salt
+        if _is_valid_anon_salt(anon_salt):
+            config["anon_salt"] = anon_salt.strip()
+        else:
+            warnings.warn(
+                "Ignoring invalid OPENADAPT_TELEMETRY_ANON_SALT; must be >= 32 chars.",
+                stacklevel=2,
+            )
 
     return config
 

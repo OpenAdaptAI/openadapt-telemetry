@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from openadapt_telemetry.privacy import (
     ALLOWED_OBSERVABILITY_KEYS,
+    MAX_TAGS,
     anonymize_identifier,
     create_before_send_filter,
     is_sensitive_key,
@@ -383,3 +384,22 @@ class TestBeforeSendEventScrubbing:
         with patch("openadapt_telemetry.privacy.scrub_exception_data", side_effect=RuntimeError("boom")):
             event = {"exception": {"values": []}}
             assert before_send(event, hint={}) is None
+
+    def test_request_non_dict_does_not_drop_event(self):
+        before_send = create_before_send_filter()
+        event = {"request": "unexpected-request-shape", "message": "ok"}
+        sanitized = before_send(event, hint={})
+        assert sanitized is not None
+        assert sanitized["request"] == "unexpected-request-shape"
+
+    def test_tag_cap_is_hard_limited(self):
+        before_send = create_before_send_filter()
+        many_tags = {f"k{i}": f"v{i}" for i in range(MAX_TAGS + 20)}
+        many_tags.update({"package": "openadapt-evals", "internal": "false"})
+        event = {"tags": many_tags}
+        sanitized = before_send(event, hint={})
+        assert sanitized is not None
+        tags = sanitized["tags"]
+        assert "package" in tags
+        assert "internal" in tags
+        assert len(tags) <= MAX_TAGS

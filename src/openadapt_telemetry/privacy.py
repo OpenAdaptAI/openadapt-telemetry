@@ -168,7 +168,14 @@ def _scrub_tags(tags: Dict[str, Any]) -> Dict[str, Any]:
     sanitized: Dict[str, Any] = {}
     dropped_count = 0
 
+    # Preserve explicitly listed observability keys first so they survive capping.
+    for key in ALLOWED_OBSERVABILITY_KEYS:
+        if key in tags and _is_safe_tag_key(key):
+            sanitized[key] = _normalize_tag_value(tags[key])
+
     for key, value in tags.items():
+        if key in sanitized:
+            continue
         if len(sanitized) >= MAX_TAGS:
             dropped_count += 1
             continue
@@ -177,13 +184,9 @@ def _scrub_tags(tags: Dict[str, Any]) -> Dict[str, Any]:
             continue
         sanitized[key] = _normalize_tag_value(value)
 
-    if dropped_count > 0:
+    # Keep hard cap strict, including metadata markers.
+    if dropped_count > 0 and len(sanitized) < MAX_TAGS:
         sanitized["_dropped_tag_count"] = str(dropped_count)
-
-    # Preserve explicitly listed observability keys whenever present.
-    for key in ALLOWED_OBSERVABILITY_KEYS:
-        if key in tags and key not in sanitized:
-            sanitized[key] = _normalize_tag_value(tags[key])
 
     return sanitized
 
@@ -398,7 +401,7 @@ def create_before_send_filter():
                 event["tags"] = _scrub_tags(event["tags"])
 
             # Scrub request data (if present)
-            if "request" in event:
+            if "request" in event and isinstance(event["request"], dict):
                 request = event["request"]
                 if "headers" in request:
                     request["headers"] = scrub_dict(request["headers"], deep=False, scrub_values=True)

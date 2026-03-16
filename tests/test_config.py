@@ -166,6 +166,13 @@ class TestEnvConfig:
             config = _get_env_config()
             assert config.get("anon_salt") == "x" * 32
 
+    def test_invalid_anon_salt_env_ignored(self):
+        """Invalid OPENADAPT_TELEMETRY_ANON_SALT should be ignored in env config."""
+        with patch.dict(os.environ, {"OPENADAPT_TELEMETRY_ANON_SALT": "short"}, clear=False):
+            with pytest.warns(UserWarning, match="Ignoring invalid OPENADAPT_TELEMETRY_ANON_SALT"):
+                config = _get_env_config()
+        assert "anon_salt" not in config
+
 
 class TestConfigFile:
     """Tests for configuration file loading."""
