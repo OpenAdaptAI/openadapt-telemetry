@@ -163,7 +163,7 @@ export OPENADAPT_TELEMETRY_ENABLED=false
 - Sensitive fields (password, token, api_key, etc.) are redacted
 - Email addresses and phone numbers are scrubbed from messages
 - Top-level event messages/logentry strings are scrubbed
-- Tag keys are allowlisted and values are scrubbed before upload
+- Tag keys are validated, sensitive/invalid keys are dropped, and values are scrubbed before upload
 - User IDs are HMAC-anonymized before upload (`anon:v2:<hash>`)
 - `send_default_pii` is enforced to `false` by the client
 

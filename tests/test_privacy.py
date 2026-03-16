@@ -307,6 +307,12 @@ class TestAnonymizeIdentifier:
         assert anonymize_identifier("anon:v1:1234567890abcdef") == "anon:v1:1234567890abcdef"
         assert anonymize_identifier("anon:1234567890abcdef") == "anon:1234567890abcdef"
 
+    def test_non_canonical_anon_prefix_is_rehashed(self):
+        with patch("openadapt_telemetry.privacy._get_anon_salt_cached", return_value="a" * 32):
+            value = anonymize_identifier("anon:user@example.com")
+        assert value.startswith("anon:v2:")
+        assert value != "anon:user@example.com"
+
 
 class TestBeforeSendUserScrubbing:
     """Tests for user context anonymization in before_send."""
@@ -359,13 +365,18 @@ class TestBeforeSendEventScrubbing:
             "tags": {
                 "package": "openadapt-evals",
                 "internal": "false",
-                "custom_tag": "user@example.com",
+                "task_id": "abc123",
+                "email": "user@example.com",
+                "not valid": "drop-me",
             },
         }
         sanitized = before_send(event, hint={})
         assert sanitized is not None
-        assert set(sanitized["tags"].keys()).issubset(ALLOWED_OBSERVABILITY_KEYS)
-        assert "custom_tag" not in sanitized["tags"]
+        assert set(ALLOWED_OBSERVABILITY_KEYS).intersection(set(sanitized["tags"].keys()))
+        assert sanitized["tags"]["task_id"] == "abc123"
+        assert "email" not in sanitized["tags"]
+        assert "not valid" not in sanitized["tags"]
+        assert sanitized["tags"]["_dropped_tag_count"] == "2"
 
     def test_filter_fails_closed_on_unexpected_error(self):
         before_send = create_before_send_filter()

@@ -111,6 +111,9 @@ ALLOWED_OBSERVABILITY_KEYS: Set[str] = {
 }
 
 ANON_VERSION = "v2"
+TAG_KEY_PATTERN = re.compile(r"^[a-zA-Z0-9._:-]{1,64}$")
+MAX_TAGS = 64
+MAX_TAG_VALUE_CHARS = 256
 
 
 @lru_cache(maxsize=1)
@@ -120,9 +123,15 @@ def _get_anon_salt_cached() -> str:
 
 
 def _is_already_anonymized(value: str, prefix: str = "anon") -> bool:
-    """Return True when value already matches anon id formats."""
-    legacy_prefix = f"{prefix}:"
-    return value.startswith(legacy_prefix)
+    """Return True only for canonical anonymous ID formats."""
+    escaped_prefix = re.escape(prefix)
+    patterns = (
+        rf"^{escaped_prefix}:v2:[0-9a-f]{{16}}$",
+        rf"^{escaped_prefix}:v1:[0-9a-f]{{16}}$",
+        rf"^{escaped_prefix}:[0-9a-f]{{16}}$",
+        rf"^{escaped_prefix}:v2:unknown$",
+    )
+    return any(re.match(pattern, value) for pattern in patterns)
 
 
 def _scrub_top_level_messages(event: Dict[str, Any]) -> None:
@@ -137,10 +146,46 @@ def _scrub_top_level_messages(event: Dict[str, Any]) -> None:
             logentry["formatted"] = scrub_string(logentry["formatted"])
 
 
+def _is_safe_tag_key(key: Any) -> bool:
+    """Return True when a tag key is safe to keep."""
+    if not isinstance(key, str):
+        return False
+    if not TAG_KEY_PATTERN.match(key):
+        return False
+    if is_sensitive_key(key):
+        return False
+    return True
+
+
+def _normalize_tag_value(value: Any) -> str:
+    """Convert a tag value to a scrubbed bounded string."""
+    scrubbed = scrub_string(str(value))
+    return scrubbed[:MAX_TAG_VALUE_CHARS]
+
+
 def _scrub_tags(tags: Dict[str, Any]) -> Dict[str, Any]:
-    """Keep allowed tag keys and scrub their values."""
-    filtered = {k: v for k, v in tags.items() if k in ALLOWED_OBSERVABILITY_KEYS}
-    return scrub_dict(filtered, deep=False, scrub_values=True)
+    """Keep safe tags, scrub values, and bound payload size."""
+    sanitized: Dict[str, Any] = {}
+    dropped_count = 0
+
+    for key, value in tags.items():
+        if len(sanitized) >= MAX_TAGS:
+            dropped_count += 1
+            continue
+        if not _is_safe_tag_key(key):
+            dropped_count += 1
+            continue
+        sanitized[key] = _normalize_tag_value(value)
+
+    if dropped_count > 0:
+        sanitized["_dropped_tag_count"] = str(dropped_count)
+
+    # Preserve explicitly listed observability keys whenever present.
+    for key in ALLOWED_OBSERVABILITY_KEYS:
+        if key in tags and key not in sanitized:
+            sanitized[key] = _normalize_tag_value(tags[key])
+
+    return sanitized
 
 
 def sanitize_path(path: str) -> str:
