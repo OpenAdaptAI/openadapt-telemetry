@@ -77,7 +77,8 @@ def _load_config_file() -> dict[str, Any]:
 
     try:
         with open(CONFIG_FILE) as f:
-            return json.load(f)
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
     except (json.JSONDecodeError, OSError):
         return {}
 

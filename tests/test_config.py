@@ -202,6 +202,18 @@ class TestConfigFile:
 
             os.unlink(f.name)
 
+    def test_load_non_dict_json_returns_empty(self):
+        """Loading valid JSON that is not an object should return empty dict."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(["not", "a", "dict"], f)
+            f.flush()
+
+            with patch("openadapt_telemetry.config.CONFIG_FILE", Path(f.name)):
+                config = _load_config_file()
+                assert config == {}
+
+            os.unlink(f.name)
+
 
 class TestLoadConfig:
     """Tests for full configuration loading."""
