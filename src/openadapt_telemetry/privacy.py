@@ -294,6 +294,8 @@ def scrub_dict(
             result[key] = scrub_dict(value, deep=True, scrub_values=scrub_values)
         elif isinstance(value, list) and deep:
             result[key] = scrub_list(value, scrub_values=scrub_values)
+        elif isinstance(value, tuple) and deep:
+            result[key] = tuple(scrub_list(list(value), scrub_values=scrub_values))
         elif isinstance(value, str):
             if scrub_values:
                 result[key] = scrub_string(value)
@@ -322,6 +324,8 @@ def scrub_list(data: List[Any], scrub_values: bool = False) -> List[Any]:
             result.append(scrub_dict(item, deep=True, scrub_values=scrub_values))
         elif isinstance(item, list):
             result.append(scrub_list(item, scrub_values=scrub_values))
+        elif isinstance(item, tuple):
+            result.append(tuple(scrub_list(list(item), scrub_values=scrub_values)))
         elif isinstance(item, str) and scrub_values:
             result.append(scrub_string(item))
         else:
@@ -404,10 +408,19 @@ def create_before_send_filter():
             if "request" in event and isinstance(event["request"], dict):
                 request = event["request"]
                 if "headers" in request:
-                    request["headers"] = scrub_dict(request["headers"], deep=False, scrub_values=True)
+                    if isinstance(request["headers"], dict):
+                        request["headers"] = scrub_dict(
+                            request["headers"], deep=False, scrub_values=True
+                        )
+                    elif isinstance(request["headers"], list):
+                        request["headers"] = scrub_list(request["headers"], scrub_values=True)
+                    elif isinstance(request["headers"], str):
+                        request["headers"] = scrub_string(request["headers"])
                 if "data" in request:
                     if isinstance(request["data"], dict):
                         request["data"] = scrub_dict(request["data"], deep=True, scrub_values=True)
+                    elif isinstance(request["data"], list):
+                        request["data"] = scrub_list(request["data"], scrub_values=True)
                     elif isinstance(request["data"], str):
                         request["data"] = scrub_string(request["data"])
 

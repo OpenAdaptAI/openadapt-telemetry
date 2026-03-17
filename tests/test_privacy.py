@@ -392,6 +392,21 @@ class TestBeforeSendEventScrubbing:
         assert sanitized is not None
         assert sanitized["request"] == "unexpected-request-shape"
 
+    def test_request_headers_tuple_list_is_scrubbed(self):
+        before_send = create_before_send_filter()
+        event = {
+            "request": {
+                "headers": [
+                    ("Authorization", "Bearer abc123"),
+                    ("X-User", "user@example.com"),
+                ],
+            },
+        }
+        sanitized = before_send(event, hint={})
+        assert sanitized is not None
+        assert sanitized["request"]["headers"][0][1] == "[REDACTED]"
+        assert sanitized["request"]["headers"][1][1] == "[REDACTED]"
+
     def test_tag_cap_is_hard_limited(self):
         before_send = create_before_send_filter()
         many_tags = {f"k{i}": f"v{i}" for i in range(MAX_TAGS + 20)}

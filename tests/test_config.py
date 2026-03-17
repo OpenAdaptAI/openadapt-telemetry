@@ -3,6 +3,7 @@
 import json
 import os
 import tempfile
+import warnings
 from pathlib import Path
 from unittest.mock import patch
 
@@ -321,3 +322,17 @@ class TestAnonSalt:
                     salt = get_or_create_anon_salt()
                     assert isinstance(salt, str)
                     assert len(salt) >= 32
+
+    def test_invalid_anon_salt_warns_once_across_config_paths(self):
+        with patch("openadapt_telemetry.config._INVALID_ANON_SALT_WARNED", False):
+            with patch.dict(os.environ, {"OPENADAPT_TELEMETRY_ANON_SALT": "short"}, clear=False):
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    _get_env_config()
+                    get_or_create_anon_salt()
+                matches = [
+                    warning
+                    for warning in caught
+                    if "Ignoring invalid OPENADAPT_TELEMETRY_ANON_SALT" in str(warning.message)
+                ]
+                assert len(matches) == 1

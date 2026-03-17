@@ -35,6 +35,7 @@ DEFAULTS = {
 # Config file location
 CONFIG_DIR = Path.home() / ".config" / "openadapt"
 CONFIG_FILE = CONFIG_DIR / "telemetry.json"
+_INVALID_ANON_SALT_WARNED = False
 
 
 @dataclass
@@ -133,10 +134,7 @@ def _get_env_config() -> dict[str, Any]:
         if _is_valid_anon_salt(anon_salt):
             config["anon_salt"] = anon_salt.strip()
         else:
-            warnings.warn(
-                "Ignoring invalid OPENADAPT_TELEMETRY_ANON_SALT; must be >= 32 chars.",
-                stacklevel=2,
-            )
+            _warn_invalid_anon_salt_once()
 
     return config
 
@@ -144,6 +142,18 @@ def _get_env_config() -> dict[str, Any]:
 def _is_valid_anon_salt(value: Any) -> bool:
     """Check whether a salt value is valid for HMAC anonymization."""
     return isinstance(value, str) and len(value.strip()) >= 32
+
+
+def _warn_invalid_anon_salt_once() -> None:
+    """Warn once per process when OPENADAPT_TELEMETRY_ANON_SALT is invalid."""
+    global _INVALID_ANON_SALT_WARNED
+    if _INVALID_ANON_SALT_WARNED:
+        return
+    warnings.warn(
+        "Ignoring invalid OPENADAPT_TELEMETRY_ANON_SALT; must be >= 32 chars.",
+        stacklevel=2,
+    )
+    _INVALID_ANON_SALT_WARNED = True
 
 
 def _generate_anon_salt() -> str:
@@ -163,10 +173,7 @@ def get_or_create_anon_salt() -> str:
     if env_salt:
         if _is_valid_anon_salt(env_salt):
             return env_salt.strip()
-        warnings.warn(
-            "Ignoring invalid OPENADAPT_TELEMETRY_ANON_SALT; must be >= 32 chars.",
-            stacklevel=2,
-        )
+        _warn_invalid_anon_salt_once()
 
     config_data = _load_config_file()
     file_salt = config_data.get("anon_salt")
