@@ -13,6 +13,7 @@ Unified telemetry and error tracking for OpenAdapt packages.
 ## Features
 
 - **Unified Error Tracking**: Consistent error reporting across all OpenAdapt packages
+- **Usage Counters (PostHog)**: Lightweight product usage events for adoption metrics
 - **Privacy-First Design**: Automatic PII scrubbing and path sanitization
 - **Configurable Opt-Out**: Respects `DO_NOT_TRACK` and custom environment variables
 - **Internal Usage Tagging**: Explicit flags + CI detection with optional git heuristic
@@ -55,6 +56,18 @@ try:
 except Exception as e:
     get_telemetry().capture_exception(e)
     raise
+```
+
+### Capture Usage Events (PostHog)
+
+```python
+from openadapt_telemetry import capture_usage_event
+
+capture_usage_event(
+    "agent_run",
+    properties={"entrypoint": "oa evals run", "mode": "live"},
+    package_name="openadapt-evals",
+)
 ```
 
 ### Using Decorators
@@ -100,6 +113,11 @@ with TelemetrySpan("indexing", "build_faiss_index") as span:
 | `OPENADAPT_DEV` | `false` | Development mode |
 | `OPENADAPT_INTERNAL_FROM_GIT` | `false` | Optional: tag as internal when running from a git checkout |
 | `OPENADAPT_TELEMETRY_DSN` | - | GlitchTip/Sentry DSN |
+| `OPENADAPT_POSTHOG_PROJECT_API_KEY` | embedded default | PostHog ingestion project token (`phc_...`) |
+| `OPENADAPT_POSTHOG_HOST` | `https://us.i.posthog.com` | PostHog ingestion host |
+| `OPENADAPT_TELEMETRY_DISTINCT_ID` | generated UUID | Stable anonymous identifier override |
+| `OPENADAPT_TELEMETRY_TIMEOUT_SECONDS` | `1.0` | PostHog network timeout |
+| `OPENADAPT_TELEMETRY_IN_CI` | `false` | Enable usage events in CI pipelines |
 | `OPENADAPT_TELEMETRY_ENVIRONMENT` | `production` | Environment name |
 | `OPENADAPT_TELEMETRY_SAMPLE_RATE` | `1.0` | Error sampling rate (0.0-1.0) |
 | `OPENADAPT_TELEMETRY_TRACES_SAMPLE_RATE` | `0.01` | Performance sampling rate |
