@@ -3,6 +3,8 @@
 import os
 from unittest.mock import patch
 
+import pytest
+
 from openadapt_telemetry.client import (
     TelemetryClient,
     get_telemetry,
@@ -96,6 +98,39 @@ class TestIsInternalUser:
         with patch.dict(os.environ, {"CI": "true"}, clear=False):
             assert is_internal_user() is True
 
+    @patch("openadapt_telemetry.client.Path.exists", return_value=False)
+    @patch("openadapt_telemetry.client.is_ci_environment", return_value=False)
+    def test_no_signals_indicates_external(self, _mock_ci, _mock_exists):
+        """Without explicit internal signals, usage should be treated as external."""
+        with patch.dict(os.environ, {"OPENADAPT_INTERNAL": "", "OPENADAPT_DEV": ""}, clear=False):
+            assert is_internal_user() is False
+
+    @patch("openadapt_telemetry.client.Path.exists", return_value=True)
+    @patch("openadapt_telemetry.client.is_ci_environment", return_value=False)
+    def test_git_repo_not_internal_by_default(self, _mock_ci, _mock_exists):
+        """Git repos should not be internal unless explicitly enabled."""
+        with patch.dict(
+            os.environ,
+            {
+                "OPENADAPT_INTERNAL": "",
+                "OPENADAPT_DEV": "",
+                "OPENADAPT_INTERNAL_FROM_GIT": "",
+            },
+            clear=False,
+        ):
+            assert is_internal_user() is False
+
+    @patch("openadapt_telemetry.client.Path.exists", return_value=True)
+    @patch("openadapt_telemetry.client.is_ci_environment", return_value=False)
+    def test_git_repo_internal_when_opted_in(self, _mock_ci, _mock_exists):
+        """Git repos should be internal when OPENADAPT_INTERNAL_FROM_GIT is enabled."""
+        with patch.dict(
+            os.environ,
+            {"OPENADAPT_INTERNAL_FROM_GIT": "true", "OPENADAPT_INTERNAL": "", "OPENADAPT_DEV": ""},
+            clear=False,
+        ):
+            assert is_internal_user() is True
+
 
 class TestTelemetryClient:
     """Tests for TelemetryClient class."""
@@ -181,6 +216,8 @@ class TestTelemetryClient:
             assert result is True
             assert client.initialized is True
             mock_sentry.init.assert_called_once()
+            init_kwargs = mock_sentry.init.call_args.kwargs
+            assert init_kwargs["send_default_pii"] is False
 
     @patch("openadapt_telemetry.client.sentry_sdk")
     def test_capture_exception_when_enabled(self, mock_sentry):
@@ -230,6 +267,74 @@ class TestTelemetryClient:
             client.set_tag("test_key", "test_value")
 
             mock_sentry.set_tag.assert_called_with("test_key", "test_value")
+
+    @patch("openadapt_telemetry.client.sentry_sdk")
+    def test_set_user_hashes_identifier_and_drops_extra_fields(self, mock_sentry):
+        """set_user should only send an anonymized ID."""
+        with patch.dict(os.environ, {"DO_NOT_TRACK": ""}, clear=False):
+            TelemetryClient.reset_instance()
+            client = TelemetryClient.get_instance()
+            client.initialize(dsn="https://test@example.com/1")
+
+            client.set_user("user@example.com", email="user@example.com", name="User")
+
+            mock_sentry.set_user.assert_called_once()
+            payload = mock_sentry.set_user.call_args.args[0]
+            assert set(payload.keys()) == {"id"}
+            assert payload["id"].startswith("anon:v2:")
+            assert payload["id"] != "user@example.com"
+
+    @patch("openadapt_telemetry.client.sentry_sdk")
+    def test_custom_before_send_is_composed_after_privacy_filter(self, mock_sentry):
+        """Custom before_send should run before built-in scrubbing."""
+
+        def custom_before_send(event, hint):
+            event.setdefault("logentry", {})["message"] = "secret user@example.com"
+            event.setdefault("tags", {})["package"] = "openadapt-evals"
+            return event
+
+        with patch.dict(os.environ, {"DO_NOT_TRACK": ""}, clear=False):
+            TelemetryClient.reset_instance()
+            client = TelemetryClient.get_instance()
+            with pytest.warns(
+                UserWarning,
+                match="Custom before_send runs before OpenAdapt privacy filtering",
+            ):
+                client.initialize(
+                    dsn="https://test@example.com/1",
+                    before_send=custom_before_send,
+                )
+
+            before_send = mock_sentry.init.call_args.kwargs["before_send"]
+            event = {"user": {"id": "user@example.com", "email": "user@example.com"}}
+            output = before_send(event, hint={})
+            assert output is not None
+            assert output["user"]["id"].startswith("anon:v2:")
+            assert "email" not in output["user"]
+            assert output["logentry"]["message"] == "secret [REDACTED]"
+
+    @patch("openadapt_telemetry.client.sentry_sdk")
+    def test_send_default_pii_override_is_ignored(self, mock_sentry):
+        """send_default_pii should always be enforced to False."""
+        with patch.dict(os.environ, {"DO_NOT_TRACK": ""}, clear=False):
+            TelemetryClient.reset_instance()
+            client = TelemetryClient.get_instance()
+            with pytest.warns(UserWarning, match="Ignoring sentry init override for send_default_pii"):
+                client.initialize(
+                    dsn="https://test@example.com/1",
+                    send_default_pii=True,
+                )
+
+            assert mock_sentry.init.call_args.kwargs["send_default_pii"] is False
+
+    def test_initialize_rejects_non_callable_before_send(self):
+        """Non-callable before_send should raise TypeError."""
+        with patch.dict(os.environ, {"DO_NOT_TRACK": ""}, clear=False):
+            TelemetryClient.reset_instance()
+            client = TelemetryClient.get_instance()
+            with patch("openadapt_telemetry.client.sentry_sdk"):
+                with pytest.raises(TypeError, match="before_send must be callable"):
+                    client.initialize(dsn="https://test@example.com/1", before_send="invalid")
 
     @patch("openadapt_telemetry.client.sentry_sdk")
     def test_add_breadcrumb(self, mock_sentry):

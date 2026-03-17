@@ -3,6 +3,7 @@
 import json
 import os
 import tempfile
+import warnings
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,9 +11,12 @@ import pytest
 
 from openadapt_telemetry.config import (
     TelemetryConfig,
+    _generate_anon_salt,
     _get_env_config,
+    _is_valid_anon_salt,
     _load_config_file,
     _parse_bool,
+    get_or_create_anon_salt,
     load_config,
     save_config,
 )
@@ -110,6 +114,16 @@ class TestEnvConfig:
             config = _get_env_config()
             assert config.get("enabled") is False
 
+    def test_do_not_track_overrides_explicit_enable(self):
+        """DO_NOT_TRACK should disable telemetry even if explicitly enabled."""
+        with patch.dict(
+            os.environ,
+            {"DO_NOT_TRACK": "1", "OPENADAPT_TELEMETRY_ENABLED": "true"},
+            clear=False,
+        ):
+            config = _get_env_config()
+            assert config.get("enabled") is False
+
     def test_internal_flag(self):
         """OPENADAPT_INTERNAL should set internal flag."""
         with patch.dict(os.environ, {"OPENADAPT_INTERNAL": "true"}, clear=False):
@@ -147,6 +161,19 @@ class TestEnvConfig:
             config = _get_env_config()
             assert "sample_rate" not in config
 
+    def test_anon_salt_env_override(self):
+        """OPENADAPT_TELEMETRY_ANON_SALT should be loaded when set."""
+        with patch.dict(os.environ, {"OPENADAPT_TELEMETRY_ANON_SALT": "x" * 32}, clear=False):
+            config = _get_env_config()
+            assert config.get("anon_salt") == "x" * 32
+
+    def test_invalid_anon_salt_env_ignored(self):
+        """Invalid OPENADAPT_TELEMETRY_ANON_SALT should be ignored in env config."""
+        with patch.dict(os.environ, {"OPENADAPT_TELEMETRY_ANON_SALT": "short"}, clear=False):
+            with pytest.warns(UserWarning, match="Ignoring invalid OPENADAPT_TELEMETRY_ANON_SALT"):
+                config = _get_env_config()
+        assert "anon_salt" not in config
+
 
 class TestConfigFile:
     """Tests for configuration file loading."""
@@ -175,6 +202,18 @@ class TestConfigFile:
         """Loading invalid JSON should return empty dict."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             f.write("not valid json {{{")
+            f.flush()
+
+            with patch("openadapt_telemetry.config.CONFIG_FILE", Path(f.name)):
+                config = _load_config_file()
+                assert config == {}
+
+            os.unlink(f.name)
+
+    def test_load_non_dict_json_returns_empty(self):
+        """Loading valid JSON that is not an object should return empty dict."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(["not", "a", "dict"], f)
             f.flush()
 
             with patch("openadapt_telemetry.config.CONFIG_FILE", Path(f.name)):
@@ -239,3 +278,61 @@ class TestSaveConfig:
                     assert loaded.enabled is False
                     assert loaded.environment == "test"
                     assert loaded.sample_rate == 0.5
+
+
+class TestAnonSalt:
+    """Tests for per-install anonymization salt handling."""
+
+    def test_validate_anon_salt(self):
+        assert _is_valid_anon_salt("x" * 32) is True
+        assert _is_valid_anon_salt("short") is False
+        assert _is_valid_anon_salt(None) is False
+
+    def test_generate_anon_salt(self):
+        salt = _generate_anon_salt()
+        assert isinstance(salt, str)
+        assert len(salt) >= 32
+
+    def test_get_or_create_anon_salt_from_env(self):
+        with patch.dict(os.environ, {"OPENADAPT_TELEMETRY_ANON_SALT": "y" * 32}, clear=False):
+            assert get_or_create_anon_salt() == "y" * 32
+
+    def test_get_or_create_anon_salt_persists_when_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "openadapt"
+            config_file = config_dir / "telemetry.json"
+            with patch("openadapt_telemetry.config.CONFIG_DIR", config_dir):
+                with patch("openadapt_telemetry.config.CONFIG_FILE", config_file):
+                    with patch.dict(os.environ, {"OPENADAPT_TELEMETRY_ANON_SALT": ""}, clear=False):
+                        first = get_or_create_anon_salt()
+                        second = get_or_create_anon_salt()
+                        assert first == second
+                        with open(config_file) as f:
+                            data = json.load(f)
+                        assert data["anon_salt"] == first
+
+    def test_get_or_create_anon_salt_recovers_from_corrupt_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir) / "openadapt"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            config_file = config_dir / "telemetry.json"
+            config_file.write_text("{not-valid-json")
+            with patch("openadapt_telemetry.config.CONFIG_DIR", config_dir):
+                with patch("openadapt_telemetry.config.CONFIG_FILE", config_file):
+                    salt = get_or_create_anon_salt()
+                    assert isinstance(salt, str)
+                    assert len(salt) >= 32
+
+    def test_invalid_anon_salt_warns_once_across_config_paths(self):
+        with patch("openadapt_telemetry.config._INVALID_ANON_SALT_WARNED", False):
+            with patch.dict(os.environ, {"OPENADAPT_TELEMETRY_ANON_SALT": "short"}, clear=False):
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    _get_env_config()
+                    get_or_create_anon_salt()
+                matches = [
+                    warning
+                    for warning in caught
+                    if "Ignoring invalid OPENADAPT_TELEMETRY_ANON_SALT" in str(warning.message)
+                ]
+                assert len(matches) == 1

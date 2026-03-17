@@ -9,13 +9,17 @@ from __future__ import annotations
 import os
 import platform
 import sys
+import warnings
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 import sentry_sdk
+from sentry_sdk.types import Event, Hint
 
 from .config import TelemetryConfig, load_config
-from .privacy import create_before_send_filter
+from .privacy import anonymize_identifier, create_before_send_filter
+
+BeforeSendFn = Callable[[Event, Hint], Optional[Event]]
 
 
 def is_running_from_executable() -> bool:
@@ -56,12 +60,11 @@ def is_ci_environment() -> bool:
 def is_internal_user() -> bool:
     """Determine if current usage is from internal team.
 
-    Uses multiple heuristics to detect internal/developer usage:
+    Uses multiple signals to detect internal/developer usage:
     1. Explicit OPENADAPT_INTERNAL environment variable
     2. OPENADAPT_DEV environment variable
-    3. Not running from frozen executable
-    4. Git repository present in current directory
-    5. CI environment detected
+    3. CI environment detected
+    4. Optional git repository heuristic when OPENADAPT_INTERNAL_FROM_GIT=true
 
     Returns:
         True if this appears to be internal usage.
@@ -74,19 +77,28 @@ def is_internal_user() -> bool:
     if os.getenv("OPENADAPT_DEV", "").lower() in ("true", "1", "yes"):
         return True
 
-    # Method 3: Not running from executable (indicates dev mode)
-    if not is_running_from_executable():
-        return True
-
-    # Method 4: Git repository present (development checkout)
-    if Path(".git").exists() or Path("../.git").exists():
-        return True
-
-    # Method 5: CI/CD environment
+    # Method 3: CI/CD environment
     if is_ci_environment():
         return True
 
+    # Method 4: optional git heuristic
+    if os.getenv("OPENADAPT_INTERNAL_FROM_GIT", "").lower() in ("true", "1", "yes"):
+        if Path(".git").exists() or Path("../.git").exists():
+            return True
+
     return False
+
+
+def _compose_before_send(base: BeforeSendFn, extra: BeforeSendFn) -> BeforeSendFn:
+    """Compose custom before_send before final privacy filtering."""
+
+    def composed(event: Event, hint: Hint) -> Optional[Event]:
+        modified = extra(event, hint)
+        if modified is None:
+            return None
+        return base(modified, hint)
+
+    return composed
 
 
 class TelemetryClient:
@@ -128,20 +140,13 @@ class TelemetryClient:
     def _check_enabled(self) -> bool:
         """Check if telemetry should be enabled.
 
-        Checks environment variables for opt-out signals.
+        Uses merged config with defaults/env/file precedence.
 
         Returns:
             True if telemetry should be enabled.
         """
-        # Universal opt-out (DO_NOT_TRACK standard)
-        if os.getenv("DO_NOT_TRACK", "").lower() in ("1", "true"):
-            return False
-
-        # Package-specific opt-out
-        if os.getenv("OPENADAPT_TELEMETRY_ENABLED", "").lower() in ("false", "0", "no"):
-            return False
-
-        return True
+        self._config = load_config()
+        return bool(self._config.enabled)
 
     @property
     def enabled(self) -> bool:
@@ -187,10 +192,8 @@ class TelemetryClient:
         Returns:
             True if initialization succeeded, False if disabled or already initialized.
         """
-        if not self._enabled:
-            return False
-
-        if self._initialized and not kwargs.get("force", False):
+        force = bool(kwargs.pop("force", False))
+        if self._initialized and not force:
             return True
 
         # Load configuration
@@ -201,13 +204,35 @@ class TelemetryClient:
             self._config.dsn = dsn
         if environment:
             self._config.environment = environment
+        self._enabled = bool(self._config.enabled)
+
+        if not self._enabled:
+            return False
 
         # Skip if no DSN configured
         if not self._config.dsn:
             return False
 
-        # Create privacy filter
-        before_send = create_before_send_filter()
+        # Always enforce privacy scrubber first; optional custom filter can run afterward.
+        base_before_send = create_before_send_filter()
+        custom_before_send = kwargs.pop("before_send", None)
+        if custom_before_send is not None:
+            if not callable(custom_before_send):
+                raise TypeError("before_send must be callable")
+            warnings.warn(
+                "Custom before_send runs before OpenAdapt privacy filtering; final payload is always scrubbed.",
+                stacklevel=2,
+            )
+            before_send = _compose_before_send(base_before_send, custom_before_send)
+        else:
+            before_send = base_before_send
+
+        if "send_default_pii" in kwargs:
+            kwargs.pop("send_default_pii")
+            warnings.warn(
+                "Ignoring sentry init override for send_default_pii; OpenAdapt telemetry enforces send_default_pii=False.",
+                stacklevel=2,
+            )
 
         # Initialize Sentry SDK
         sentry_kwargs = {
@@ -215,14 +240,13 @@ class TelemetryClient:
             "environment": self._config.environment,
             "sample_rate": self._config.sample_rate,
             "traces_sample_rate": self._config.traces_sample_rate,
-            "send_default_pii": self._config.send_default_pii,
+            # Enforced for privacy safety across all callers/configs.
+            "send_default_pii": False,
             "before_send": before_send,
         }
 
         # Merge in any additional kwargs
         sentry_kwargs.update(kwargs)
-        # Remove our internal kwargs
-        sentry_kwargs.pop("force", None)
 
         sentry_sdk.init(**sentry_kwargs)
 
@@ -314,12 +338,13 @@ class TelemetryClient:
         Note: Only sets anonymous user ID. Never set email, name, or other PII.
 
         Args:
-            user_id: Anonymous user identifier.
-            **kwargs: Additional user properties (id only recommended).
+            user_id: User identifier to hash before sending.
+            **kwargs: Ignored. Additional user fields are dropped.
         """
         if not self._enabled or not self._initialized:
             return
-        sentry_sdk.set_user({"id": user_id, **kwargs})
+        _ = kwargs
+        sentry_sdk.set_user({"id": anonymize_identifier(user_id)})
 
     def set_tag(self, key: str, value: str) -> None:
         """Set a custom tag for all subsequent events.
