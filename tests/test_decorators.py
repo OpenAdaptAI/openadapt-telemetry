@@ -1,6 +1,5 @@
 """Tests for telemetry decorators."""
 
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -171,20 +170,20 @@ class TestTelemetrySpan:
 
     def test_basic_usage(self):
         """Basic span usage should work."""
-        with TelemetrySpan("test_op", "test_span") as span:
+        with TelemetrySpan("test_op", "test_span"):
             result = 1 + 1
 
         assert result == 2
 
     def test_with_description(self):
         """Span with description should work."""
-        with TelemetrySpan("op", "name", description="Test description") as span:
+        with TelemetrySpan("op", "name", description="Test description"):
             pass
 
     def test_exception_handling(self):
         """Exceptions should propagate through span."""
         with pytest.raises(ValueError, match="test"):
-            with TelemetrySpan("op", "name") as span:
+            with TelemetrySpan("op", "name"):
                 raise ValueError("test")
 
     def test_set_tag(self):
