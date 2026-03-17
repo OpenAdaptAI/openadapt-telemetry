@@ -105,6 +105,32 @@ class TestIsInternalUser:
         with patch.dict(os.environ, {"OPENADAPT_INTERNAL": "", "OPENADAPT_DEV": ""}, clear=False):
             assert is_internal_user() is False
 
+    @patch("openadapt_telemetry.client.Path.exists", return_value=True)
+    @patch("openadapt_telemetry.client.is_ci_environment", return_value=False)
+    def test_git_repo_not_internal_by_default(self, _mock_ci, _mock_exists):
+        """Git repos should not be internal unless explicitly enabled."""
+        with patch.dict(
+            os.environ,
+            {
+                "OPENADAPT_INTERNAL": "",
+                "OPENADAPT_DEV": "",
+                "OPENADAPT_INTERNAL_FROM_GIT": "",
+            },
+            clear=False,
+        ):
+            assert is_internal_user() is False
+
+    @patch("openadapt_telemetry.client.Path.exists", return_value=True)
+    @patch("openadapt_telemetry.client.is_ci_environment", return_value=False)
+    def test_git_repo_internal_when_opted_in(self, _mock_ci, _mock_exists):
+        """Git repos should be internal when OPENADAPT_INTERNAL_FROM_GIT is enabled."""
+        with patch.dict(
+            os.environ,
+            {"OPENADAPT_INTERNAL_FROM_GIT": "true", "OPENADAPT_INTERNAL": "", "OPENADAPT_DEV": ""},
+            clear=False,
+        ):
+            assert is_internal_user() is True
+
 
 class TestTelemetryClient:
     """Tests for TelemetryClient class."""
@@ -255,21 +281,25 @@ class TestTelemetryClient:
             mock_sentry.set_user.assert_called_once()
             payload = mock_sentry.set_user.call_args.args[0]
             assert set(payload.keys()) == {"id"}
-            assert payload["id"].startswith("anon:")
+            assert payload["id"].startswith("anon:v2:")
             assert payload["id"] != "user@example.com"
 
     @patch("openadapt_telemetry.client.sentry_sdk")
     def test_custom_before_send_is_composed_after_privacy_filter(self, mock_sentry):
-        """Custom before_send should run after built-in scrubbing."""
+        """Custom before_send should run before built-in scrubbing."""
 
         def custom_before_send(event, hint):
-            event.setdefault("tags", {})["custom"] = "true"
+            event.setdefault("logentry", {})["message"] = "secret user@example.com"
+            event.setdefault("tags", {})["package"] = "openadapt-evals"
             return event
 
         with patch.dict(os.environ, {"DO_NOT_TRACK": ""}, clear=False):
             TelemetryClient.reset_instance()
             client = TelemetryClient.get_instance()
-            with pytest.warns(UserWarning, match="Custom before_send is composed after OpenAdapt privacy filtering"):
+            with pytest.warns(
+                UserWarning,
+                match="Custom before_send runs before OpenAdapt privacy filtering",
+            ):
                 client.initialize(
                     dsn="https://test@example.com/1",
                     before_send=custom_before_send,
@@ -279,9 +309,9 @@ class TestTelemetryClient:
             event = {"user": {"id": "user@example.com", "email": "user@example.com"}}
             output = before_send(event, hint={})
             assert output is not None
-            assert output["user"]["id"].startswith("anon:")
+            assert output["user"]["id"].startswith("anon:v2:")
             assert "email" not in output["user"]
-            assert output["tags"]["custom"] == "true"
+            assert output["logentry"]["message"] == "secret [REDACTED]"
 
     @patch("openadapt_telemetry.client.sentry_sdk")
     def test_send_default_pii_override_is_ignored(self, mock_sentry):

@@ -1,7 +1,10 @@
 """Tests for privacy filtering and PII scrubbing."""
 
+from unittest.mock import patch
 
 from openadapt_telemetry.privacy import (
+    ALLOWED_OBSERVABILITY_KEYS,
+    MAX_TAGS,
     anonymize_identifier,
     create_before_send_filter,
     is_sensitive_key,
@@ -280,19 +283,36 @@ class TestScrubExceptionData:
 class TestAnonymizeIdentifier:
     """Tests for deterministic identifier anonymization."""
 
-    def test_stable_hash(self):
-        first = anonymize_identifier("user@example.com")
-        second = anonymize_identifier("user@example.com")
+    def test_stable_hash_with_same_salt(self):
+        with patch("openadapt_telemetry.privacy._get_anon_salt_cached", return_value="a" * 32):
+            first = anonymize_identifier("user@example.com")
+            second = anonymize_identifier("user@example.com")
         assert first == second
-        assert first.startswith("anon:")
+        assert first.startswith("anon:v2:")
         assert first != "user@example.com"
 
+    def test_different_salts_produce_different_ids(self):
+        with patch("openadapt_telemetry.privacy._get_anon_salt_cached", return_value="a" * 32):
+            first = anonymize_identifier("user@example.com")
+        with patch("openadapt_telemetry.privacy._get_anon_salt_cached", return_value="b" * 32):
+            second = anonymize_identifier("user@example.com")
+        assert first != second
+
     def test_empty_value(self):
-        assert anonymize_identifier("") == "anon:unknown"
+        assert anonymize_identifier("") == "anon:v2:unknown"
 
     def test_already_anonymized_id_is_not_rehashed(self):
-        anon_id = anonymize_identifier("user@example.com")
+        with patch("openadapt_telemetry.privacy._get_anon_salt_cached", return_value="a" * 32):
+            anon_id = anonymize_identifier("user@example.com")
         assert anonymize_identifier(anon_id) == anon_id
+        assert anonymize_identifier("anon:v1:1234567890abcdef") == "anon:v1:1234567890abcdef"
+        assert anonymize_identifier("anon:1234567890abcdef") == "anon:1234567890abcdef"
+
+    def test_non_canonical_anon_prefix_is_rehashed(self):
+        with patch("openadapt_telemetry.privacy._get_anon_salt_cached", return_value="a" * 32):
+            value = anonymize_identifier("anon:user@example.com")
+        assert value.startswith("anon:v2:")
+        assert value != "anon:user@example.com"
 
 
 class TestBeforeSendUserScrubbing:
@@ -311,5 +331,90 @@ class TestBeforeSendUserScrubbing:
         assert sanitized is not None
         assert "user" in sanitized
         assert set(sanitized["user"].keys()) == {"id"}
-        assert sanitized["user"]["id"].startswith("anon:")
+        assert sanitized["user"]["id"].startswith("anon:v2:")
         assert sanitized["user"]["id"] != "user@example.com"
+
+
+class TestBeforeSendEventScrubbing:
+    """Tests for event-level before_send filtering behavior."""
+
+    def test_top_level_message_is_scrubbed(self):
+        before_send = create_before_send_filter()
+        event = {"message": "Failure for user@example.com"}
+        sanitized = before_send(event, hint={})
+        assert sanitized is not None
+        assert "user@example.com" not in sanitized["message"]
+
+    def test_logentry_message_is_scrubbed(self):
+        before_send = create_before_send_filter()
+        event = {"logentry": {"message": "token=Bearer abc123", "formatted": "email user@example.com"}}
+        sanitized = before_send(event, hint={})
+        assert sanitized is not None
+        assert "abc123" not in sanitized["logentry"]["message"]
+        assert "user@example.com" not in sanitized["logentry"]["formatted"]
+
+    def test_context_values_are_scrubbed(self):
+        before_send = create_before_send_filter()
+        event = {"contexts": {"runtime": {"note": "contact me at user@example.com"}}}
+        sanitized = before_send(event, hint={})
+        assert sanitized is not None
+        assert sanitized["contexts"]["runtime"]["note"] == "contact me at [REDACTED]"
+
+    def test_tags_are_allowlisted_and_scrubbed(self):
+        before_send = create_before_send_filter()
+        event = {
+            "tags": {
+                "package": "openadapt-evals",
+                "internal": "false",
+                "task_id": "abc123",
+                "email": "user@example.com",
+                "not valid": "drop-me",
+            },
+        }
+        sanitized = before_send(event, hint={})
+        assert sanitized is not None
+        assert set(ALLOWED_OBSERVABILITY_KEYS).intersection(set(sanitized["tags"].keys()))
+        assert sanitized["tags"]["task_id"] == "abc123"
+        assert "email" not in sanitized["tags"]
+        assert "not valid" not in sanitized["tags"]
+        assert sanitized["tags"]["_dropped_tag_count"] == "2"
+
+    def test_filter_fails_closed_on_unexpected_error(self):
+        before_send = create_before_send_filter()
+        with patch("openadapt_telemetry.privacy.scrub_exception_data", side_effect=RuntimeError("boom")):
+            event = {"exception": {"values": []}}
+            assert before_send(event, hint={}) is None
+
+    def test_request_non_dict_does_not_drop_event(self):
+        before_send = create_before_send_filter()
+        event = {"request": "unexpected-request-shape", "message": "ok"}
+        sanitized = before_send(event, hint={})
+        assert sanitized is not None
+        assert sanitized["request"] == "unexpected-request-shape"
+
+    def test_request_headers_tuple_list_is_scrubbed(self):
+        before_send = create_before_send_filter()
+        event = {
+            "request": {
+                "headers": [
+                    ("Authorization", "Bearer abc123"),
+                    ("X-User", "user@example.com"),
+                ],
+            },
+        }
+        sanitized = before_send(event, hint={})
+        assert sanitized is not None
+        assert sanitized["request"]["headers"][0][1] == "[REDACTED]"
+        assert sanitized["request"]["headers"][1][1] == "[REDACTED]"
+
+    def test_tag_cap_is_hard_limited(self):
+        before_send = create_before_send_filter()
+        many_tags = {f"k{i}": f"v{i}" for i in range(MAX_TAGS + 20)}
+        many_tags.update({"package": "openadapt-evals", "internal": "false"})
+        event = {"tags": many_tags}
+        sanitized = before_send(event, hint={})
+        assert sanitized is not None
+        tags = sanitized["tags"]
+        assert "package" in tags
+        assert "internal" in tags
+        assert len(tags) <= MAX_TAGS

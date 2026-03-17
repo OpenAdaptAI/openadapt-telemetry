@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -27,11 +29,13 @@ DEFAULTS = {
     "performance_tracking": True,
     "feature_usage": True,
     "send_default_pii": False,
+    "anon_salt": None,
 }
 
 # Config file location
 CONFIG_DIR = Path.home() / ".config" / "openadapt"
 CONFIG_FILE = CONFIG_DIR / "telemetry.json"
+_INVALID_ANON_SALT_WARNED = False
 
 
 @dataclass
@@ -48,6 +52,7 @@ class TelemetryConfig:
     performance_tracking: bool = True
     feature_usage: bool = True
     send_default_pii: bool = False
+    anon_salt: Optional[str] = None
 
     _loaded: bool = field(default=False, repr=False)
 
@@ -73,7 +78,8 @@ def _load_config_file() -> dict[str, Any]:
 
     try:
         with open(CONFIG_FILE) as f:
-            return json.load(f)
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
     except (json.JSONDecodeError, OSError):
         return {}
 
@@ -122,7 +128,70 @@ def _get_env_config() -> dict[str, Any]:
         except ValueError:
             pass
 
+    # Optional override for deterministic anonymization in controlled environments.
+    anon_salt = os.getenv("OPENADAPT_TELEMETRY_ANON_SALT")
+    if anon_salt:
+        if _is_valid_anon_salt(anon_salt):
+            config["anon_salt"] = anon_salt.strip()
+        else:
+            _warn_invalid_anon_salt_once()
+
     return config
+
+
+def _is_valid_anon_salt(value: Any) -> bool:
+    """Check whether a salt value is valid for HMAC anonymization."""
+    return isinstance(value, str) and len(value.strip()) >= 32
+
+
+def _warn_invalid_anon_salt_once() -> None:
+    """Warn once per process when OPENADAPT_TELEMETRY_ANON_SALT is invalid."""
+    global _INVALID_ANON_SALT_WARNED
+    if _INVALID_ANON_SALT_WARNED:
+        return
+    warnings.warn(
+        "Ignoring invalid OPENADAPT_TELEMETRY_ANON_SALT; must be >= 32 chars.",
+        stacklevel=2,
+    )
+    _INVALID_ANON_SALT_WARNED = True
+
+
+def _generate_anon_salt() -> str:
+    """Generate a high-entropy random salt."""
+    return secrets.token_hex(32)
+
+
+def get_or_create_anon_salt() -> str:
+    """Get anonymization salt from env/config, creating one if missing.
+
+    Priority:
+    1. OPENADAPT_TELEMETRY_ANON_SALT (if valid)
+    2. telemetry config file `anon_salt` (if valid)
+    3. generated and persisted random salt
+    """
+    env_salt = os.getenv("OPENADAPT_TELEMETRY_ANON_SALT")
+    if env_salt:
+        if _is_valid_anon_salt(env_salt):
+            return env_salt.strip()
+        _warn_invalid_anon_salt_once()
+
+    config_data = _load_config_file()
+    file_salt = config_data.get("anon_salt")
+    if _is_valid_anon_salt(file_salt):
+        return str(file_salt).strip()
+
+    generated = _generate_anon_salt()
+    config_data["anon_salt"] = generated
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(config_data, f, indent=2)
+    except OSError:
+        warnings.warn(
+            "Failed to persist telemetry anonymization salt; using ephemeral salt for this process.",
+            stacklevel=2,
+        )
+    return generated
 
 
 def load_config() -> TelemetryConfig:
@@ -148,7 +217,7 @@ def load_config() -> TelemetryConfig:
     merged.update(env_config)
 
     # Remove None values for fields that should use defaults
-    config_dict = {k: v for k, v in merged.items() if v is not None or k == "dsn"}
+    config_dict = {k: v for k, v in merged.items() if v is not None or k in {"dsn", "anon_salt"}}
 
     return TelemetryConfig(**config_dict, _loaded=True)
 
@@ -172,6 +241,7 @@ def save_config(config: TelemetryConfig) -> None:
         "performance_tracking": config.performance_tracking,
         "feature_usage": config.feature_usage,
         "send_default_pii": config.send_default_pii,
+        "anon_salt": config.anon_salt,
     }
 
     with open(CONFIG_FILE, "w") as f:

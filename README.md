@@ -15,7 +15,7 @@ Unified telemetry and error tracking for OpenAdapt packages.
 - **Unified Error Tracking**: Consistent error reporting across all OpenAdapt packages
 - **Privacy-First Design**: Automatic PII scrubbing and path sanitization
 - **Configurable Opt-Out**: Respects `DO_NOT_TRACK` and custom environment variables
-- **CI/Dev Mode Detection**: Automatically tags internal usage for filtering
+- **Internal Usage Tagging**: Explicit flags + CI detection with optional git heuristic
 - **GlitchTip/Sentry Compatible**: Uses the Sentry SDK for maximum compatibility
 
 ## Installation
@@ -98,10 +98,12 @@ with TelemetrySpan("indexing", "build_faiss_index") as span:
 | `OPENADAPT_TELEMETRY_ENABLED` | `true` | Enable/disable telemetry |
 | `OPENADAPT_INTERNAL` | `false` | Tag as internal usage |
 | `OPENADAPT_DEV` | `false` | Development mode |
+| `OPENADAPT_INTERNAL_FROM_GIT` | `false` | Optional: tag as internal when running from a git checkout |
 | `OPENADAPT_TELEMETRY_DSN` | - | GlitchTip/Sentry DSN |
 | `OPENADAPT_TELEMETRY_ENVIRONMENT` | `production` | Environment name |
 | `OPENADAPT_TELEMETRY_SAMPLE_RATE` | `1.0` | Error sampling rate (0.0-1.0) |
 | `OPENADAPT_TELEMETRY_TRACES_SAMPLE_RATE` | `0.01` | Performance sampling rate |
+| `OPENADAPT_TELEMETRY_ANON_SALT` | generated | Optional anonymization salt override (advanced use only) |
 
 ### Configuration File
 
@@ -160,7 +162,9 @@ export OPENADAPT_TELEMETRY_ENABLED=false
 - File paths have usernames replaced with `<user>`
 - Sensitive fields (password, token, api_key, etc.) are redacted
 - Email addresses and phone numbers are scrubbed from messages
-- User IDs are hashed before upload (`anon:<hash>`)
+- Top-level event messages/logentry strings are scrubbed
+- Tag keys are validated, sensitive/invalid keys are dropped, and values are scrubbed before upload
+- User IDs are HMAC-anonymized before upload (`anon:v2:<hash>`)
 - `send_default_pii` is enforced to `false` by the client
 
 ## Internal Usage Tagging
@@ -169,8 +173,8 @@ Internal/developer usage is automatically detected via:
 
 1. `OPENADAPT_INTERNAL=true` environment variable
 2. `OPENADAPT_DEV=true` environment variable
-3. Git repository present in working directory
-4. CI environment detected (GitHub Actions, GitLab CI, etc.)
+3. CI environment detected (GitHub Actions, GitLab CI, etc.)
+4. Optional git repository heuristic when `OPENADAPT_INTERNAL_FROM_GIT=true`
 
 Filter in GlitchTip:
 ```
