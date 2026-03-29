@@ -1,6 +1,26 @@
 # CHANGELOG
 
 
+## v0.3.0 (2026-03-29)
+
+### Features
+
+- Disable telemetry via pyproject.toml [tool.openadapt]
+  ([#5](https://github.com/OpenAdaptAI/openadapt-telemetry/pull/5),
+  [`a4ffd34`](https://github.com/OpenAdaptAI/openadapt-telemetry/commit/a4ffd34265d78edbf29effb051dbdf1537c23b15))
+
+Enterprises can commit one file to disable telemetry for all devs:
+
+[tool.openadapt] telemetry = false
+
+Walks up from cwd to find nearest pyproject.toml. Uses tomllib (stdlib 3.11+) or tomli fallback.
+  Only checks the first pyproject.toml found (nearest to cwd).
+
+Priority: DO_NOT_TRACK > OPENADAPT_TELEMETRY_ENABLED > pyproject.toml > CI detection.
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.2.0 (2026-03-17)
 
 
