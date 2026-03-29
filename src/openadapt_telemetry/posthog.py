@@ -37,14 +37,56 @@ def _is_truthy(raw: str | None) -> bool:
     return str(raw or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _pyproject_telemetry_disabled() -> bool:
+    """Check if telemetry is disabled via pyproject.toml [tool.openadapt].
+
+    Walks up from cwd looking for pyproject.toml with::
+
+        [tool.openadapt]
+        telemetry = false
+
+    This lets enterprises commit one file to their repo to disable
+    telemetry for all developers — no per-user .env needed.
+    """
+    try:
+        import tomllib
+    except ImportError:
+        try:
+            import tomli as tomllib  # type: ignore[no-redef]
+        except ImportError:
+            return False
+
+    from pathlib import Path
+
+    for parent in [Path.cwd(), *Path.cwd().parents]:
+        pyproject = parent / "pyproject.toml"
+        if pyproject.is_file():
+            try:
+                data = tomllib.loads(pyproject.read_text())
+                val = data.get("tool", {}).get("openadapt", {}).get("telemetry")
+                if val is not None:
+                    return not _is_truthy(str(val))
+            except Exception:
+                pass
+            break  # only check the nearest pyproject.toml
+    return False
+
+
 def _usage_enabled() -> bool:
+    # 1. Standard DO_NOT_TRACK env var (consoledonottrack.com)
     if _is_truthy(os.getenv("DO_NOT_TRACK")):
         return False
 
+    # 2. Explicit env var
     explicit = os.getenv("OPENADAPT_TELEMETRY_ENABLED")
     if explicit is not None:
         return _is_truthy(explicit)
 
+    # 3. pyproject.toml [tool.openadapt] telemetry = false
+    if _pyproject_telemetry_disabled():
+        return False
+
+    # 4. CI environments default to off
     if is_ci_environment() and not _is_truthy(os.getenv("OPENADAPT_TELEMETRY_IN_CI")):
         return False
 
