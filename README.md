@@ -18,6 +18,9 @@ Unified telemetry and error tracking for OpenAdapt packages.
 - **Configurable Opt-Out**: Respects `DO_NOT_TRACK` and custom environment variables
 - **Internal Usage Tagging**: Explicit flags + CI detection with optional git heuristic
 - **GlitchTip/Sentry Compatible**: Uses the Sentry SDK for maximum compatibility
+- **Failure recurrence without customer evidence**: Closed categorical failure
+  signatures omit application, tenant, workflow, step, text, input, screenshot,
+  origin, and exception details
 
 ## Installation
 
@@ -69,6 +72,31 @@ capture_usage_event(
     package_name="openadapt-evals",
 )
 ```
+
+### Capture an automation failure safely
+
+Use the closed-schema failure API rather than sending an exception message or
+run report as analytics. Its grouping key is derived only from categorical
+runtime facts; it is not an installation or tenant identifier.
+
+```python
+from openadapt_telemetry import (
+    ActionKind, AutomationFailureSignal, DeliveryState, ExecutionOutcome,
+    FailureKind, RiskClass, Substrate, capture_automation_failure,
+)
+
+capture_automation_failure(AutomationFailureSignal(
+    failure_kind=FailureKind.DELIVERY_UNCERTAIN,
+    substrate=Substrate.CITRIX,
+    action_kind=ActionKind.CLICK,
+    risk_class=RiskClass.CONSEQUENTIAL,
+    delivery_state=DeliveryState.UNCERTAIN,
+    outcome=ExecutionOutcome.HALTED,
+))
+```
+
+This signal supports aggregate discovery only. Full evidence remains local,
+and no signal can authorize or promote a repair.
 
 ### Using Decorators
 

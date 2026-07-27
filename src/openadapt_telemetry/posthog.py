@@ -150,6 +150,32 @@ def _base_properties(package_name: str) -> dict[str, Any]:
     }
 
 
+def _queue_capture_payload(
+    *,
+    event: str,
+    distinct_id: str,
+    properties: dict[str, Any],
+) -> bool:
+    """Queue an already-bounded event payload.
+
+    This is deliberately private.  Public callers use :func:`capture_event`,
+    which supplies the installation pseudonym.  Closed-schema aggregate events
+    (for example automation failure signatures) may instead use a non-user
+    grouping key without exposing an installation or tenant identifier.
+    """
+    payload = {
+        "api_key": _posthog_project_api_key(),
+        "event": event,
+        "distinct_id": distinct_id,
+        "properties": properties,
+    }
+    try:
+        _ensure_worker().put_nowait(payload)
+        return True
+    except queue.Full:
+        return False
+
+
 def _send_payload(payload: dict[str, Any]) -> None:
     timeout_seconds = float(os.getenv("OPENADAPT_TELEMETRY_TIMEOUT_SECONDS", "1.0"))
     req = urllib.request.Request(
@@ -203,21 +229,14 @@ def capture_event(
     if not event_name or not _usage_enabled():
         return False
 
-    payload = {
-        "api_key": _posthog_project_api_key(),
-        "event": event_name,
-        "distinct_id": _get_distinct_id(),
-        "properties": {
+    return _queue_capture_payload(
+        event=event_name,
+        distinct_id=_get_distinct_id(),
+        properties={
             **_base_properties(package_name),
             **_sanitize_properties(properties),
         },
-    }
-
-    try:
-        _ensure_worker().put_nowait(payload)
-        return True
-    except queue.Full:
-        return False
+    )
 
 
 def capture_usage_event(
