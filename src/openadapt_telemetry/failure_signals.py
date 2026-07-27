@@ -25,7 +25,7 @@ from .posthog import _base_properties, _queue_capture_payload, _usage_enabled
 
 FAILURE_SIGNAL_SCHEMA = "openadapt.automation-failure-signal/v1"
 FAILURE_SIGNAL_EVENT = "automation_failure_observed"
-_RELEASE_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$")
+_RELEASE_RE = re.compile(r"^(?:unknown|[0-9]+(?:\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)$")
 
 
 class _ValueEnum(str, Enum):
@@ -253,8 +253,6 @@ class AutomationFailureSignal:
 
 def capture_automation_failure(
     signal: AutomationFailureSignal,
-    *,
-    package_name: str = "openadapt-flow",
 ) -> bool:
     """Queue a closed failure signal while honoring the standard opt-out.
 
@@ -271,7 +269,7 @@ def capture_automation_failure(
         event=FAILURE_SIGNAL_EVENT,
         distinct_id=f"failure:{signal.failure_signature}",
         properties={
-            **_base_properties(package_name),
+            **_base_properties("openadapt-flow"),
             **signal.to_envelope(),
         },
     )

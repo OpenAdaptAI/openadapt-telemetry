@@ -82,6 +82,8 @@ def test_invalid_free_form_inputs_fail_closed() -> None:
         _signal(failure_kind="patient john smith")
     with pytest.raises(ValueError, match="runtime_version"):
         _signal(runtime_version="patient@example.com")
+    with pytest.raises(ValueError, match="runtime_version"):
+        _signal(runtime_version="JohnSmith")
 
 
 def test_capture_groups_by_failure_not_installation() -> None:
