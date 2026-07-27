@@ -167,7 +167,10 @@ def _queue_capture_payload(
         "api_key": _posthog_project_api_key(),
         "event": event,
         "distinct_id": distinct_id,
-        "properties": properties,
+        # This client runs on end-user machines. Explicitly suppress PostHog's
+        # ingest-side IP geolocation for every event; callers cannot override
+        # the privacy boundary with a supplied property.
+        "properties": {**properties, "$geoip_disable": True},
     }
     try:
         _ensure_worker().put_nowait(payload)
