@@ -80,6 +80,22 @@ from openadapt_telemetry.events import (
     track_shutdown,
     track_startup,
 )
+from openadapt_telemetry.failure_signals import (
+    FAILURE_SIGNAL_EVENT,
+    FAILURE_SIGNAL_SCHEMA,
+    ActionKind,
+    AutomationFailureSignal,
+    DeliveryState,
+    EffectTier,
+    ExecutionOutcome,
+    ExecutionProfile,
+    FailureKind,
+    IdentityState,
+    ResolutionRung,
+    RiskClass,
+    Substrate,
+    capture_automation_failure,
+)
 from openadapt_telemetry.posthog import (
     capture_event as capture_posthog_event,
 )
@@ -138,6 +154,21 @@ __all__ = [
     "track_command",
     "track_operation",
     "track_error",
+    # Privacy-safe automation failure discovery
+    "FAILURE_SIGNAL_EVENT",
+    "FAILURE_SIGNAL_SCHEMA",
+    "AutomationFailureSignal",
+    "FailureKind",
+    "Substrate",
+    "ActionKind",
+    "RiskClass",
+    "ResolutionRung",
+    "IdentityState",
+    "EffectTier",
+    "DeliveryState",
+    "ExecutionProfile",
+    "ExecutionOutcome",
+    "capture_automation_failure",
     # PostHog usage events
     "capture_posthog_event",
     "capture_usage_event",
