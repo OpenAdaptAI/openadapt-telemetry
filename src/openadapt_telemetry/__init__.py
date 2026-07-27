@@ -113,7 +113,7 @@ from openadapt_telemetry.privacy import (
     scrub_string,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 __all__ = [
     # Version

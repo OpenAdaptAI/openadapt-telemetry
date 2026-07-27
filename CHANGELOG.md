@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.3.1 (2026-07-27)
+
+### Bug Fixes
+
+- Disable PostHog GeoIP enrichment ([#7](https://github.com/OpenAdaptAI/openadapt-telemetry/pull/7),
+  [`da7a858`](https://github.com/OpenAdaptAI/openadapt-telemetry/commit/da7a858cbf018c75f0630eb1ec0b682e8aaca0d5))
+
+
 ## v0.3.0 (2026-03-29)
 
 ### Features
