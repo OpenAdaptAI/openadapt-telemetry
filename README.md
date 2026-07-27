@@ -212,6 +212,7 @@ export OPENADAPT_TELEMETRY_ENABLED=false
 - Tag keys are validated, sensitive/invalid keys are dropped, and values are scrubbed before upload
 - User IDs are HMAC-anonymized before upload (`anon:v2:<hash>`)
 - `send_default_pii` is enforced to `false` by the client
+- PostHog events set `$geoip_disable: true` to suppress IP geolocation enrichment
 
 ## Internal Usage Tagging
 

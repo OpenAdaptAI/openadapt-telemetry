@@ -44,6 +44,7 @@ def test_capture_event_enabled_in_ci_with_override() -> None:
             assert queue.payload is not None
             assert queue.payload["event"] == "agent_run"
             assert queue.payload["distinct_id"] == "test-id"
+            assert queue.payload["properties"]["$geoip_disable"] is True
 
 
 def test_capture_event_scrubs_sensitive_properties() -> None:
