@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "openadapt-telemetry"
 version = "0.3.1"
-description = "Unified telemetry and error tracking for OpenAdapt packages"
+description = "Error reports and usage counts for OpenAdapt packages, filtered before sending, with one opt-out"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"

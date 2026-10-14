@@ -18,7 +18,7 @@ pytest tests/ -v
 pytest tests/ --cov=openadapt_telemetry
 
 # Run linting
-ruff check src/
+ruff check .
 ```
 
 ## Package Structure
@@ -31,13 +31,16 @@ openadapt-telemetry/
 │   ├── client.py             # TelemetryClient (Sentry wrapper)
 │   ├── privacy.py            # PII filtering and scrubbing
 │   ├── decorators.py         # Convenience decorators
-│   └── events.py             # Event types and helpers
+│   ├── events.py             # Event types and helpers
+│   ├── posthog.py            # PostHog usage events
+│   └── failure_signals.py    # Closed-schema automation failure signals
 ├── tests/
-│   ├── conftest.py           # Pytest fixtures
-│   ├── test_client.py        # Client tests
-│   ├── test_config.py        # Configuration tests
-│   ├── test_decorators.py    # Decorator tests
-│   └── test_privacy.py       # Privacy filtering tests
+│   ├── conftest.py           # Fixtures, including an in-memory Sentry transport
+│   ├── test_sentry_payload.py  # What a real Sentry client sends
+│   ├── test_opt_out.py       # The shared opt-out rule
+│   ├── test_readme.py        # Runs the README and docs examples
+│   └── ...
+├── docs/COMPLIANCE.md        # Data-handling reference for reviewers
 ├── pyproject.toml            # Package metadata
 ├── README.md                 # Documentation
 └── LICENSE                   # MIT License
@@ -121,12 +124,12 @@ Config file location: `~/.config/openadapt/telemetry.json`
 
 ## Internal User Detection
 
-The package automatically detects internal/developer usage via:
+The package detects internal/developer usage via:
 1. `OPENADAPT_INTERNAL=true` environment variable
 2. `OPENADAPT_DEV=true` environment variable
-3. Running from source (not frozen executable)
-4. Git repository present in working directory
-5. CI environment detected (GitHub Actions, GitLab CI, etc.)
+3. CI environment detected (GitHub Actions, GitLab CI, etc.)
+4. `OPENADAPT_INTERNAL_FROM_GIT=true` and a `.git` directory in the working directory or its parent
+5. `"internal": true` in the config file
 
 Internal users are tagged with `internal: true` for filtering in GlitchTip.
 
@@ -164,7 +167,7 @@ except ImportError:
 ## Dependencies
 
 Core:
-- `sentry-sdk>=2.0.0` - Sentry/GlitchTip SDK
+- `sentry-sdk>=2.15.0` - Sentry/GlitchTip SDK (CI also tests against 2.15.0)
 
 Dev:
 - `pytest>=8.0.0` - Testing

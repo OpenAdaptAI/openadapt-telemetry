@@ -4,11 +4,12 @@ This package provides a privacy-first telemetry system for all OpenAdapt package
 using GlitchTip/Sentry SDK for error tracking and performance monitoring.
 
 Features:
-- Unified error tracking across all packages
-- Privacy-first design with automatic PII scrubbing
-- Configurable opt-out (DO_NOT_TRACK, OPENADAPT_TELEMETRY_ENABLED)
+- Error reports to GlitchTip or Sentry, filtered before sending
+- Usage events to PostHog
+- One opt-out rule for both (DO_NOT_TRACK, OPENADAPT_TELEMETRY_ENABLED,
+  [tool.openadapt] in pyproject.toml, or the config file)
 - CI/dev mode detection for filtering internal usage
-- Convenient decorators for tracking errors, performance, and features
+- Decorators for tracking errors, performance, and features
 
 Quick Start:
     from openadapt_telemetry import get_telemetry
