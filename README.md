@@ -5,16 +5,22 @@
 [![PyPI version](https://img.shields.io/pypi/v/openadapt-telemetry.svg)](https://pypi.org/project/openadapt-telemetry/)
 [![Downloads](https://img.shields.io/pypi/dm/openadapt-telemetry.svg)](https://pypi.org/project/openadapt-telemetry/)
 
-Error reports and usage counts for OpenAdapt packages. Data is filtered on the
-user's machine before it is sent, and `DO_NOT_TRACK=1` turns everything off.
+Error reports and usage events for [OpenAdapt](https://github.com/OpenAdaptAI/OpenAdapt)
+packages. Data is filtered on the user's machine before it is sent, and
+`DO_NOT_TRACK=1` turns everything off.
 
-- **If you run OpenAdapt**, see [what is sent](#what-is-sent) and
-  [how to turn it off](#turn-it-off).
+- **If an OpenAdapt package you use depends on this one**, see
+  [what is sent](#what-is-sent) and [how to turn it off](#turn-it-off).
+  `pip show openadapt-telemetry` lists those packages under `Required-by`.
 - **If you build an OpenAdapt package**, the quick start below sends error
   reports to your GlitchTip or Sentry project. Other Python projects can use it
-  the same way with their own DSN.
+  for error reports the same way. Usage events go to OpenAdapt's PostHog project
+  unless `OPENADAPT_POSTHOG_PROJECT_API_KEY` names another.
 
 ## Quick start
+
+Install the package and set the DSN, the URL with a key that GlitchTip or Sentry
+shows in your project's settings:
 
 ```bash
 pip install openadapt-telemetry
@@ -36,7 +42,7 @@ except OSError as exc:
 GlitchTip receives
 `FileNotFoundError: [Errno 2] No such file or directory: '/Users/<user>/notes.txt'`
 with the file, function and line of each stack frame. Without a DSN, or after
-an opt-out, `initialize()` returns `False` and nothing is sent.
+an opt-out, `initialize()` returns `False` and no error reports are sent.
 
 To see the filter without a DSN:
 
@@ -54,26 +60,27 @@ Any one of these turns off both error reports and usage events:
 |-------|---------|
 | Environment | `DO_NOT_TRACK=1` (or `true`, `yes`, `on`) |
 | Environment | `OPENADAPT_TELEMETRY_ENABLED=false` |
-| `pyproject.toml` of a repository, for everyone who works in it | `telemetry = false` under `[tool.openadapt]` |
+| The nearest `pyproject.toml` at or above the current directory, for everyone who works in that repository | `telemetry = false` under `[tool.openadapt]` |
 | `~/.config/openadapt/telemetry.json` | `{"enabled": false}` |
 
 `DO_NOT_TRACK` overrides everything else. `OPENADAPT_TELEMETRY_ENABLED=true`
-overrides the two files. Usage events are also off in CI unless
-`OPENADAPT_TELEMETRY_IN_CI=true` or `OPENADAPT_TELEMETRY_ENABLED=true`. Code can
-check the result with `openadapt_telemetry.is_telemetry_allowed()`.
+overrides the two files. Code can check the result with
+`openadapt_telemetry.is_telemetry_allowed()`. Usage events are also off in CI
+unless `OPENADAPT_TELEMETRY_IN_CI=true` or `OPENADAPT_TELEMETRY_ENABLED=true`.
 
 ## What is sent
 
 | | Error reports | Usage events |
 |-|---------------|--------------|
 | Destination | The GlitchTip or Sentry project named by the DSN. With no DSN, nothing is sent. | OpenAdapt's PostHog project, unless `OPENADAPT_POSTHOG_PROJECT_API_KEY` names another one |
-| When | After `initialize()`: on `capture_exception` or `capture_message`, an uncaught exception, an `ERROR` log record, or a `track_*` decorator or `TelemetrySpan` | When a package calls `capture_usage_event` |
-| Contents | Exception type and message; file, function and line of each stack frame; recent log lines and HTTP request URLs; timings; package, Python and OS versions; names and versions of installed Python packages; whether the run looks internal or CI | Event name; package, Python and OS versions; a timestamp; a random install ID kept in `~/.openadapt/telemetry_distinct_id`; the properties the package passes |
+| When | After `initialize()`: on `capture_exception` or `capture_message`, an uncaught exception, an `ERROR` log record, or a call to a function wrapped by a `track_*` decorator | When a package calls `capture_usage_event` |
+| Contents | Exception type and message; file, function and line of each stack frame; recent log lines and HTTP request URLs; timings; package, Python and OS versions; names and versions of installed Python packages; whether the run looks internal or CI | Event name; package and Python versions; OS name; a timestamp; a random install ID kept in `~/.openadapt/telemetry_distinct_id`; the properties the package passes |
 | Removed before sending | User names in home-directory paths; emails, phone, card and social security numbers, bearer tokens and long key-like strings; values under keys such as `password`, `token` or `email`; the host name; the command line; local variable values; source code lines; URL query strings | Properties under sensitive keys; the same patterns in property values. Strings are cut to 256 characters. |
 
-Data-handling details, including the closed-schema automation failure signal
-(`capture_automation_failure`), are in
-[docs/COMPLIANCE.md](https://github.com/OpenAdaptAI/openadapt-telemetry/blob/main/docs/COMPLIANCE.md).
+The exact filter rules are in
+[docs/COMPLIANCE.md](https://github.com/OpenAdaptAI/openadapt-telemetry/blob/main/docs/COMPLIANCE.md),
+along with `capture_automation_failure`, which reports an automation failure as
+fixed categories, a version, a count and an hour, with no free text.
 
 ## Usage events
 
@@ -84,8 +91,10 @@ capture_usage_event("demo_recorded", properties={"steps": 12}, package_name="myp
 ```
 
 A background thread sends the event with a 1-second timeout, so a slow or
-unreachable server doesn't block the caller. The function returns `False` when
-telemetry is off or the queue is full.
+unreachable server doesn't block the caller. Events still queued when the
+process exits are dropped, so a script that exits right after the call may send
+nothing. The function returns `False` when telemetry is off or the queue is
+full.
 
 ## Decorators and spans
 
@@ -95,17 +104,19 @@ from openadapt_telemetry import TelemetrySpan, track_errors, track_feature, trac
 @track_errors()  # report exceptions, then re-raise
 def process(data): ...
 
-@track_performance("indexing.build")  # record a timed transaction
+@track_performance("indexing.build")  # send a timed transaction (1% by default)
 def build_index(vectors): ...
 
-@track_feature("retrieval.add_demo")  # count each call
+@track_feature("retrieval.add_demo")  # send a message event on each call
 def add_demo(demo_id): ...
 
-with TelemetrySpan("indexing", "load_vectors") as span:
+with TelemetrySpan("indexing", "load_vectors") as span:  # a timed step
     span.set_data("count", 1000)
 ```
 
-These do nothing until `initialize()` succeeds.
+These send to the same GlitchTip or Sentry project as error reports, and do
+nothing until `initialize()` succeeds. A `TelemetrySpan` is sent as a step of
+the `track_performance` transaction it runs in. Outside one, it sends nothing.
 
 ## Configuration
 
@@ -147,8 +158,10 @@ The config file takes these keys:
 - The string filter matches patterns. It doesn't recognize names, addresses or
   other free text, so an exception message such as `no record for Jane Doe` is
   sent as written.
-- URL paths in HTTP breadcrumbs are kept, so an identifier in a path (for
-  example `/patients/123`) is sent.
+- Paths are kept apart from the user name. Stack frames carry each file's full
+  path and HTTP breadcrumbs carry each URL's path, so a name or identifier in a
+  path (for example `/Users/<user>/clients/acme/app.py` or `/patients/123`) is
+  sent.
 - GlitchTip, Sentry and PostHog see the IP address of each connection, as any
   web server does. The library doesn't put IP addresses in events and asks
   PostHog not to look up location.

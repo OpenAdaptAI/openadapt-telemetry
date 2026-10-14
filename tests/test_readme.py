@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from openadapt_telemetry import TelemetryClient
+from openadapt_telemetry import TelemetryClient, get_telemetry
 
 ROOT = Path(__file__).resolve().parent.parent
 README = ROOT / "README.md"
@@ -103,6 +103,22 @@ def test_usage_event_example_queues_an_event(monkeypatch):
 def test_decorator_example_runs_before_initialize():
     """The decorator example runs as written and does nothing until initialize()."""
     exec(_python_block("TelemetrySpan("), {})
+
+
+def test_decorator_example_after_initialize(clean_env, sentry_events):
+    """track_feature sends a message per call; a span outside a transaction sends nothing."""
+    TelemetryClient.reset_instance()
+    get_telemetry().initialize(dsn="https://public@example.invalid/1", traces_sample_rate=1.0)
+    namespace: dict = {}
+    exec(_python_block("TelemetrySpan("), namespace)
+    assert sentry_events("transaction") == []
+
+    namespace["add_demo"]("demo-1")
+    namespace["add_demo"]("demo-2")
+    assert len(sentry_events("event")) == 2
+    namespace["build_index"]([1, 2, 3])
+    (transaction,) = sentry_events("transaction")
+    assert transaction["transaction"] == "indexing.build"
 
 
 @pytest.mark.parametrize(
