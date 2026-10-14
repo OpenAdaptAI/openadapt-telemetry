@@ -54,6 +54,23 @@ def test_error_event_carries_no_personal_or_application_data(live_client, sentry
     assert event["tags"]["package"] == "openadapt-test"
 
 
+def test_release_is_the_package_version_not_a_git_commit(live_client, sentry_events):
+    """The tests run inside a git checkout, where the SDK would send its commit hash."""
+    live_client.capture_message("hello")
+    (event,) = sentry_events("event")
+    assert event["release"] == "openadapt-test@1.0.0"
+
+
+def test_caller_can_set_the_release(clean_env, sentry_events):
+    TelemetryClient.reset_instance()
+    get_telemetry().initialize(
+        dsn="https://public@example.invalid/1", package_name="pkg", release="pkg@abc"
+    )
+    get_telemetry().capture_message("hello")
+    (event,) = sentry_events("event")
+    assert event["release"] == "pkg@abc"
+
+
 def test_transactions_go_through_the_privacy_filter(live_client, sentry_events):
     @track_performance("indexing.build")
     def build():

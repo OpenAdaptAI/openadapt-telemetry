@@ -256,6 +256,10 @@ class TelemetryClient:
             "environment": self._config.environment,
             "sample_rate": self._config.sample_rate,
             "traces_sample_rate": self._config.traces_sample_rate,
+            # Without a release, the SDK sends the commit hash of whatever git
+            # checkout the process runs in. The package version names the code
+            # that raised instead; a caller can still pass release=.
+            "release": f"{package_name}@{package_version}",
             # send_default_pii is left at the SDK default (off) rather than
             # passed, because newer SDKs deprecate the option. Callers cannot
             # override it (see _ENFORCED_SENTRY_OPTIONS).

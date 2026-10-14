@@ -37,6 +37,7 @@ Error reports use the Sentry SDK (2.15 or later) and go to the DSN in
 | Option | Value |
 |--------|-------|
 | `send_default_pii` | SDK default (off). Passing it is refused with a warning. |
+| `release` | `<package_name>@<package_version>`. A caller can pass another value. Left unset, the SDK would send the commit hash of the git checkout the process runs in. |
 | `data_collection` | Not set. Passing it is refused with a warning, because newer SDKs let it override `send_default_pii`. |
 | `include_local_variables` | `False`. A caller can pass `True`, but the filter still removes local variables. |
 | `include_source_context` | `False`. A caller can pass `True`, but the filter still removes source lines. |
