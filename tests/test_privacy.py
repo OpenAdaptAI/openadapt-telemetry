@@ -254,8 +254,8 @@ class TestScrubExceptionData:
 
         assert "user@example.com" not in exception_data["values"][0]["value"]
 
-    def test_local_variables_scrubbing(self):
-        """Local variables in stack frames should be scrubbed."""
+    def test_local_variables_and_source_lines_dropped(self):
+        """Stack frames keep the code location only, not values or source lines."""
         exception_data = {
             "values": [
                 {
@@ -263,10 +263,15 @@ class TestScrubExceptionData:
                         "frames": [
                             {
                                 "filename": "app.py",
+                                "function": "save",
+                                "lineno": 12,
                                 "vars": {
                                     "password": "secret123",
-                                    "username": "john",
+                                    "note": "patient text",
                                 },
+                                "pre_context": ["note = read()"],
+                                "context_line": "save(note)",
+                                "post_context": ["return"],
                             },
                         ],
                     },
@@ -276,8 +281,23 @@ class TestScrubExceptionData:
         scrub_exception_data(exception_data)
 
         frame = exception_data["values"][0]["stacktrace"]["frames"][0]
-        assert frame["vars"]["password"] == "[REDACTED]"
-        assert frame["vars"]["username"] == "john"
+        assert frame == {"filename": "app.py", "function": "save", "lineno": 12}
+
+    def test_home_path_in_exception_message_sanitized(self):
+        """A path in an exception message loses the user name."""
+        exception_data = {
+            "values": [
+                {
+                    "type": "FileNotFoundError",
+                    "value": "No such file: '/Users/john/notes/visit.txt'",
+                },
+            ],
+        }
+        scrub_exception_data(exception_data)
+
+        assert exception_data["values"][0]["value"] == (
+            "No such file: '/Users/<user>/notes/visit.txt'"
+        )
 
 
 class TestAnonymizeIdentifier:
