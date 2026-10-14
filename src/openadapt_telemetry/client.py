@@ -126,7 +126,7 @@ class TelemetryClient:
         self._initialized = False
         self._config: Optional[TelemetryConfig] = None
         self._enabled = self._check_enabled()
-        self._internal = is_internal_user()
+        self._internal = self._check_internal()
 
     @classmethod
     def get_instance(cls) -> "TelemetryClient":
@@ -154,6 +154,10 @@ class TelemetryClient:
         """
         self._config = load_config()
         return bool(self._config.enabled)
+
+    def _check_internal(self) -> bool:
+        """Return True for internal usage: env flags, CI, or ``"internal": true`` in the config file."""
+        return is_internal_user() or bool(self._config is not None and self._config.internal)
 
     @property
     def enabled(self) -> bool:
@@ -212,6 +216,7 @@ class TelemetryClient:
         if environment:
             self._config.environment = environment
         self._enabled = bool(self._config.enabled)
+        self._internal = self._check_internal()
 
         if not self._enabled:
             return False

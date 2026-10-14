@@ -126,3 +126,10 @@ def test_opted_out_usage_event_is_not_queued(project):
     with patch("openadapt_telemetry.posthog._ensure_worker") as worker:
         assert posthog.capture_usage_event("agent_run") is False
     worker.assert_not_called()
+
+
+def test_config_file_internal_flag_tags_reports(project):
+    config.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    config.CONFIG_FILE.write_text(json.dumps({"internal": True}))
+    TelemetryClient.reset_instance()
+    assert TelemetryClient.get_instance().internal is True
