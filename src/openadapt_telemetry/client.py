@@ -91,7 +91,7 @@ def is_internal_user() -> bool:
 
 # Sentry options a caller may not override, with the reason given in the warning.
 _ENFORCED_SENTRY_OPTIONS = {
-    "send_default_pii": "OpenAdapt telemetry enforces send_default_pii=False.",
+    "send_default_pii": "OpenAdapt telemetry never sends default PII.",
     "data_collection": "OpenAdapt telemetry does not collect personal data.",
 }
 
@@ -251,8 +251,9 @@ class TelemetryClient:
             "environment": self._config.environment,
             "sample_rate": self._config.sample_rate,
             "traces_sample_rate": self._config.traces_sample_rate,
-            # Enforced for privacy safety across all callers/configs.
-            "send_default_pii": False,
+            # send_default_pii is left at the SDK default (off) rather than
+            # passed, because newer SDKs deprecate the option. Callers cannot
+            # override it (see _ENFORCED_SENTRY_OPTIONS).
             # Local variable values and source lines can hold application data.
             # The privacy filter drops them too; these options stop the SDK
             # from collecting them in the first place.
@@ -336,7 +337,7 @@ class TelemetryClient:
 
         properties = properties or {}
 
-        with sentry_sdk.push_scope() as scope:
+        with sentry_sdk.new_scope() as scope:
             for key, value in properties.items():
                 scope.set_extra(key, value)
             return sentry_sdk.capture_message(

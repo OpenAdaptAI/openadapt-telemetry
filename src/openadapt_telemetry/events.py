@@ -7,7 +7,7 @@ across all OpenAdapt packages.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, Optional
 
@@ -60,7 +60,7 @@ class TelemetryEvent:
     severity: EventSeverity = EventSeverity.INFO
     properties: Dict[str, Any] = field(default_factory=dict)
     tags: Dict[str, str] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def send(self) -> Optional[str]:
         """Send this event to the telemetry backend.

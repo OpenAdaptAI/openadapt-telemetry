@@ -37,7 +37,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "sentry-sdk>=2.0.0",
+    "sentry-sdk>=2.15.0",
 ]
 
 [project.optional-dependencies]

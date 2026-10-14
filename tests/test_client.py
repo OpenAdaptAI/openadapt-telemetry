@@ -217,7 +217,7 @@ class TestTelemetryClient:
             assert client.initialized is True
             mock_sentry.init.assert_called_once()
             init_kwargs = mock_sentry.init.call_args.kwargs
-            assert init_kwargs["send_default_pii"] is False
+            assert "send_default_pii" not in init_kwargs  # SDK default is off
 
     @patch("openadapt_telemetry.client.sentry_sdk")
     def test_capture_exception_when_enabled(self, mock_sentry):
@@ -325,7 +325,7 @@ class TestTelemetryClient:
                     send_default_pii=True,
                 )
 
-            assert mock_sentry.init.call_args.kwargs["send_default_pii"] is False
+            assert "send_default_pii" not in mock_sentry.init.call_args.kwargs
 
     @patch("openadapt_telemetry.client.sentry_sdk")
     def test_data_collection_override_is_ignored(self, mock_sentry):

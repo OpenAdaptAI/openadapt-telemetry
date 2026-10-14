@@ -58,6 +58,10 @@ def _fail(note: str) -> None:
     raise FileNotFoundError(f"No such file: {path!r}")
 
 
+def test_sdk_default_pii_is_off(live_client):
+    assert sentry_sdk.get_client().should_send_default_pii() is False
+
+
 def test_error_event_carries_no_personal_or_application_data(live_client):
     try:
         _fail("visit-notes.txt")
