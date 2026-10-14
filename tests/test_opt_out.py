@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -133,3 +134,21 @@ def test_config_file_internal_flag_tags_reports(project):
     config.CONFIG_FILE.write_text(json.dumps({"internal": True}))
     TelemetryClient.reset_instance()
     assert TelemetryClient.get_instance().internal is True
+
+
+def test_python_310_installs_a_toml_parser():
+    """Python 3.10 has no tomllib, so the package must depend on tomli there.
+
+    Without it the pyproject.toml opt-out is silently ignored. pytest pulls in
+    tomli on 3.10, so this checks the declared dependency instead of importing.
+    """
+    try:
+        import tomllib
+    except ImportError:  # Python 3.10, where pytest provides tomli
+        import tomli as tomllib
+
+    text = (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text()
+    dependencies = tomllib.loads(text)["project"]["dependencies"]
+    assert any(
+        d.startswith("tomli") and "python_version < '3.11'" in d for d in dependencies
+    )

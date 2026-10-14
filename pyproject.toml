@@ -38,6 +38,8 @@ classifiers = [
 
 dependencies = [
     "sentry-sdk>=2.15.0",
+    # Reads [tool.openadapt] in pyproject.toml; Python 3.11+ has tomllib.
+    "tomli>=1.1.0; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
