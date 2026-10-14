@@ -5,6 +5,9 @@ and package defaults following the priority order:
 1. Environment variables (highest priority)
 2. Configuration file (~/.config/openadapt/telemetry.json)
 3. Package defaults (lowest priority)
+
+Whether telemetry runs at all is decided by :func:`is_telemetry_allowed`, which
+also honors ``[tool.openadapt] telemetry = false`` in the nearest pyproject.toml.
 """
 
 from __future__ import annotations
@@ -68,7 +71,78 @@ class TelemetryConfig:
 
 def _parse_bool(value: str) -> bool:
     """Parse a boolean from a string value."""
-    return value.lower() in ("true", "1", "yes", "on")
+    return value.strip().lower() in ("true", "1", "yes", "on")
+
+
+def _pyproject_opts_out() -> bool:
+    """Return True when the nearest pyproject.toml turns telemetry off.
+
+    Walks up from the current directory to the first ``pyproject.toml`` and
+    reads::
+
+        [tool.openadapt]
+        telemetry = false
+
+    This lets a team commit one file to turn telemetry off for everyone who
+    works in the repository.
+    """
+    try:
+        import tomllib
+    except ImportError:
+        try:
+            import tomli as tomllib  # type: ignore[no-redef]
+        except ImportError:
+            return False
+
+    try:
+        cwd = Path.cwd()
+    except OSError:
+        return False
+
+    for parent in [cwd, *cwd.parents]:
+        pyproject = parent / "pyproject.toml"
+        if pyproject.is_file():
+            try:
+                data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+            except Exception:
+                return False
+            value = data.get("tool", {}).get("openadapt", {}).get("telemetry")
+            if value is None:
+                return False
+            return not _parse_bool(str(value))
+    return False
+
+
+def _file_opts_out(file_config: dict[str, Any]) -> bool:
+    """Return True when the config file sets ``"enabled"`` to a false value."""
+    value = file_config.get("enabled")
+    if isinstance(value, bool):
+        return not value
+    if isinstance(value, str):
+        return not _parse_bool(value)
+    return False
+
+
+def is_telemetry_allowed() -> bool:
+    """Apply the opt-out rule shared by error reports and usage events.
+
+    In order of precedence:
+
+    1. ``DO_NOT_TRACK`` set to ``1``, ``true``, ``yes`` or ``on`` turns telemetry off.
+    2. ``OPENADAPT_TELEMETRY_ENABLED``, when set, decides.
+    3. ``[tool.openadapt] telemetry = false`` in the nearest pyproject.toml turns it off.
+    4. ``"enabled": false`` in ~/.config/openadapt/telemetry.json turns it off.
+
+    Otherwise telemetry is allowed.
+    """
+    if _parse_bool(os.getenv("DO_NOT_TRACK", "")):
+        return False
+    explicit = os.getenv("OPENADAPT_TELEMETRY_ENABLED", "").strip()
+    if explicit:
+        return _parse_bool(explicit)
+    if _pyproject_opts_out():
+        return False
+    return not _file_opts_out(_load_config_file())
 
 
 def _load_config_file() -> dict[str, Any]:
@@ -94,7 +168,7 @@ def _get_env_config() -> dict[str, Any]:
         config["enabled"] = _parse_bool(enabled_env)
 
     # Universal opt-out (DO_NOT_TRACK standard) always wins.
-    if os.getenv("DO_NOT_TRACK", "").lower() in ("1", "true"):
+    if _parse_bool(os.getenv("DO_NOT_TRACK", "")):
         config["enabled"] = False
 
     # Internal/developer flags
@@ -215,6 +289,9 @@ def load_config() -> TelemetryConfig:
     # Layer in environment variables (highest priority)
     env_config = _get_env_config()
     merged.update(env_config)
+
+    # One opt-out rule for every telemetry path (see is_telemetry_allowed).
+    merged["enabled"] = is_telemetry_allowed()
 
     # Remove None values for fields that should use defaults
     config_dict = {k: v for k, v in merged.items() if v is not None or k in {"dsn", "anon_salt"}}

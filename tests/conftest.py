@@ -9,6 +9,18 @@ from openadapt_telemetry.client import TelemetryClient
 
 
 @pytest.fixture(autouse=True)
+def isolated_home(tmp_path, monkeypatch):
+    """Keep tests away from the real ~/.config/openadapt and ~/.openadapt files."""
+    config_dir = tmp_path / "config" / "openadapt"
+    monkeypatch.setattr("openadapt_telemetry.config.CONFIG_DIR", config_dir)
+    monkeypatch.setattr("openadapt_telemetry.config.CONFIG_FILE", config_dir / "telemetry.json")
+    monkeypatch.setattr(
+        "openadapt_telemetry.posthog.DISTINCT_ID_FILE",
+        tmp_path / "openadapt" / "telemetry_distinct_id",
+    )
+
+
+@pytest.fixture(autouse=True)
 def reset_telemetry():
     """Reset telemetry singleton before and after each test."""
     TelemetryClient.reset_instance()

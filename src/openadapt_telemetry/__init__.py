@@ -61,6 +61,7 @@ from openadapt_telemetry.config import (
     CONFIG_FILE,
     DEFAULTS,
     TelemetryConfig,
+    is_telemetry_allowed,
     load_config,
     save_config,
 )
@@ -126,6 +127,7 @@ __all__ = [
     "is_running_from_executable",
     # Config
     "TelemetryConfig",
+    "is_telemetry_allowed",
     "load_config",
     "save_config",
     "CONFIG_DIR",
