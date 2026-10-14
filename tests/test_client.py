@@ -217,7 +217,7 @@ class TestTelemetryClient:
             assert client.initialized is True
             mock_sentry.init.assert_called_once()
             init_kwargs = mock_sentry.init.call_args.kwargs
-            assert init_kwargs["send_default_pii"] is False
+            assert "send_default_pii" not in init_kwargs  # SDK default is off
 
     @patch("openadapt_telemetry.client.sentry_sdk")
     def test_capture_exception_when_enabled(self, mock_sentry):
@@ -325,7 +325,58 @@ class TestTelemetryClient:
                     send_default_pii=True,
                 )
 
-            assert mock_sentry.init.call_args.kwargs["send_default_pii"] is False
+            assert "send_default_pii" not in mock_sentry.init.call_args.kwargs
+
+    @patch("openadapt_telemetry.client.sentry_sdk")
+    def test_data_collection_override_is_ignored(self, mock_sentry):
+        """data_collection would supersede send_default_pii, so it is refused."""
+        with patch.dict(os.environ, {"DO_NOT_TRACK": ""}, clear=False):
+            TelemetryClient.reset_instance()
+            client = TelemetryClient.get_instance()
+            with pytest.warns(UserWarning, match="Ignoring sentry init override for data_collection"):
+                client.initialize(
+                    dsn="https://test@example.com/1",
+                    data_collection={"user_info": True},
+                )
+
+            assert "data_collection" not in mock_sentry.init.call_args.kwargs
+
+    @patch("openadapt_telemetry.client.sentry_sdk")
+    def test_privacy_filter_covers_transactions(self, mock_sentry):
+        """Transactions get the same filter as errors, and frames carry no values."""
+        with patch.dict(os.environ, {"DO_NOT_TRACK": ""}, clear=False):
+            TelemetryClient.reset_instance()
+            client = TelemetryClient.get_instance()
+            client.initialize(dsn="https://test@example.com/1")
+
+            kwargs = mock_sentry.init.call_args.kwargs
+            assert kwargs["include_local_variables"] is False
+            assert kwargs["include_source_context"] is False
+            transaction = {"server_name": "alices-laptop", "tags": {"password": "x"}}
+            output = kwargs["before_send_transaction"](transaction, {})
+            assert output is not None
+            assert "server_name" not in output
+            assert "password" not in output["tags"]
+
+    @patch("openadapt_telemetry.client.sentry_sdk")
+    def test_custom_before_send_transaction_runs_before_privacy_filter(self, mock_sentry):
+        """A caller's before_send_transaction cannot bypass the privacy filter."""
+
+        def custom(event, hint):
+            event["server_name"] = "alices-laptop"
+            return event
+
+        with patch.dict(os.environ, {"DO_NOT_TRACK": ""}, clear=False):
+            TelemetryClient.reset_instance()
+            client = TelemetryClient.get_instance()
+            with pytest.warns(UserWarning, match="Custom before_send_transaction runs before"):
+                client.initialize(
+                    dsn="https://test@example.com/1",
+                    before_send_transaction=custom,
+                )
+
+            hook = mock_sentry.init.call_args.kwargs["before_send_transaction"]
+            assert "server_name" not in hook({}, {})
 
     def test_initialize_rejects_non_callable_before_send(self):
         """Non-callable before_send should raise TypeError."""

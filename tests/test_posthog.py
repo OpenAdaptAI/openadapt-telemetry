@@ -73,3 +73,28 @@ def test_capture_event_scrubs_sensitive_properties() -> None:
             assert props["entrypoint"] == "oa evals run"
             assert "api_key" not in props
             assert "password" not in props
+
+
+def test_capture_event_scrubs_property_values() -> None:
+    queue = _CaptureQueue()
+    with patch.dict(
+        os.environ,
+        {
+            "OPENADAPT_TELEMETRY_ENABLED": "true",
+            "OPENADAPT_TELEMETRY_DISTINCT_ID": "test-id",
+        },
+        clear=False,
+    ):
+        with patch("openadapt_telemetry.posthog._ensure_worker", return_value=queue):
+            assert posthog.capture_event(
+                "demo_recorded",
+                {
+                    "steps": 12,
+                    "owner": "alice@example.com",
+                    "source": "/Users/alice/demos/intake.json",
+                },
+            )
+    props = queue.payload["properties"]
+    assert props["steps"] == 12
+    assert "owner" not in props
+    assert props["source"] == "/Users/<user>/demos/intake.json"

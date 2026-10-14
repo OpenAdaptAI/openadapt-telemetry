@@ -62,7 +62,7 @@ def track_performance(
                     raise
                 finally:
                     duration = time.perf_counter() - start
-                    sentry_sdk.set_measurement("duration_ms", duration * 1000, "millisecond")
+                    transaction.set_data("duration_ms", duration * 1000)
 
         return wrapper  # type: ignore
 
@@ -234,7 +234,7 @@ class TelemetrySpan:
             else:
                 self._span.set_status("ok")
 
-            self._span.set_measurement("duration_ms", duration * 1000, "millisecond")
+            self._span.set_data("duration_ms", duration * 1000)
             self._span.__exit__(exc_type, exc_val, exc_tb)
 
     def set_tag(self, key: str, value: str) -> None:

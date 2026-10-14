@@ -89,6 +89,13 @@ def is_internal_user() -> bool:
     return False
 
 
+# Sentry options a caller may not override, with the reason given in the warning.
+_ENFORCED_SENTRY_OPTIONS = {
+    "send_default_pii": "OpenAdapt telemetry never sends default PII.",
+    "data_collection": "OpenAdapt telemetry does not collect personal data.",
+}
+
+
 def _compose_before_send(base: BeforeSendFn, extra: BeforeSendFn) -> BeforeSendFn:
     """Compose custom before_send before final privacy filtering."""
 
@@ -119,7 +126,7 @@ class TelemetryClient:
         self._initialized = False
         self._config: Optional[TelemetryConfig] = None
         self._enabled = self._check_enabled()
-        self._internal = is_internal_user()
+        self._internal = self._check_internal()
 
     @classmethod
     def get_instance(cls) -> "TelemetryClient":
@@ -147,6 +154,10 @@ class TelemetryClient:
         """
         self._config = load_config()
         return bool(self._config.enabled)
+
+    def _check_internal(self) -> bool:
+        """Return True for internal usage: env flags, CI, or ``"internal": true`` in the config file."""
+        return is_internal_user() or bool(self._config is not None and self._config.internal)
 
     @property
     def enabled(self) -> bool:
@@ -205,6 +216,7 @@ class TelemetryClient:
         if environment:
             self._config.environment = environment
         self._enabled = bool(self._config.enabled)
+        self._internal = self._check_internal()
 
         if not self._enabled:
             return False
@@ -213,26 +225,30 @@ class TelemetryClient:
         if not self._config.dsn:
             return False
 
-        # Always enforce privacy scrubber first; optional custom filter can run afterward.
+        # The privacy filter always runs last, on errors and on transactions.
+        # A caller's own filter may run first.
         base_before_send = create_before_send_filter()
-        custom_before_send = kwargs.pop("before_send", None)
-        if custom_before_send is not None:
-            if not callable(custom_before_send):
-                raise TypeError("before_send must be callable")
+        hooks = {}
+        for hook in ("before_send", "before_send_transaction"):
+            custom = kwargs.pop(hook, None)
+            if custom is None:
+                hooks[hook] = base_before_send
+                continue
+            if not callable(custom):
+                raise TypeError(f"{hook} must be callable")
             warnings.warn(
-                "Custom before_send runs before OpenAdapt privacy filtering; final payload is always scrubbed.",
+                f"Custom {hook} runs before OpenAdapt privacy filtering; final payload is always scrubbed.",
                 stacklevel=2,
             )
-            before_send = _compose_before_send(base_before_send, custom_before_send)
-        else:
-            before_send = base_before_send
+            hooks[hook] = _compose_before_send(base_before_send, custom)
 
-        if "send_default_pii" in kwargs:
-            kwargs.pop("send_default_pii")
-            warnings.warn(
-                "Ignoring sentry init override for send_default_pii; OpenAdapt telemetry enforces send_default_pii=False.",
-                stacklevel=2,
-            )
+        for option, reason in _ENFORCED_SENTRY_OPTIONS.items():
+            if option in kwargs:
+                kwargs.pop(option)
+                warnings.warn(
+                    f"Ignoring sentry init override for {option}; {reason}",
+                    stacklevel=2,
+                )
 
         # Initialize Sentry SDK
         sentry_kwargs = {
@@ -240,9 +256,19 @@ class TelemetryClient:
             "environment": self._config.environment,
             "sample_rate": self._config.sample_rate,
             "traces_sample_rate": self._config.traces_sample_rate,
-            # Enforced for privacy safety across all callers/configs.
-            "send_default_pii": False,
-            "before_send": before_send,
+            # Without a release, the SDK sends the commit hash of whatever git
+            # checkout the process runs in. The package version names the code
+            # that raised instead; a caller can still pass release=.
+            "release": f"{package_name}@{package_version}",
+            # send_default_pii is left at the SDK default (off) rather than
+            # passed, because newer SDKs deprecate the option. Callers cannot
+            # override it (see _ENFORCED_SENTRY_OPTIONS).
+            # Local variable values and source lines can hold application data.
+            # The privacy filter drops them too; these options stop the SDK
+            # from collecting them in the first place.
+            "include_local_variables": False,
+            "include_source_context": False,
+            **hooks,
         }
 
         # Merge in any additional kwargs
@@ -320,7 +346,7 @@ class TelemetryClient:
 
         properties = properties or {}
 
-        with sentry_sdk.push_scope() as scope:
+        with sentry_sdk.new_scope() as scope:
             for key, value in properties.items():
                 scope.set_extra(key, value)
             return sentry_sdk.capture_message(

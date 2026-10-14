@@ -144,6 +144,12 @@ def _scrub_top_level_messages(event: Dict[str, Any]) -> None:
             logentry["message"] = scrub_string(logentry["message"])
         if isinstance(logentry.get("formatted"), str):
             logentry["formatted"] = scrub_string(logentry["formatted"])
+        # Arguments of a log call such as logging.error("failed for %s", path).
+        params = logentry.get("params")
+        if isinstance(params, (list, tuple)):
+            logentry["params"] = scrub_list(list(params), scrub_values=True)
+        elif isinstance(params, dict):
+            logentry["params"] = scrub_dict(params, deep=True, scrub_values=True)
 
 
 def _is_safe_tag_key(key: Any) -> bool:
@@ -242,12 +248,17 @@ def is_sensitive_key(key: str) -> bool:
 def scrub_string(value: str) -> str:
     """Scrub sensitive patterns from a string value.
 
+    Removes the user name from home-directory paths, then replaces emails,
+    phone numbers, card numbers, SSNs, bearer tokens and long key-like strings
+    with ``[REDACTED]``.
+
     Args:
         value: The string to scrub.
 
     Returns:
         The scrubbed string with sensitive patterns replaced.
     """
+    value = sanitize_path(value)
     for pattern in SENSITIVE_PATTERNS:
         value = pattern.sub("[REDACTED]", value)
     return value
@@ -334,12 +345,33 @@ def scrub_list(data: List[Any], scrub_values: bool = False) -> List[Any]:
     return result
 
 
+# Stack-frame fields that can carry application data rather than code location:
+# local variable values and the source lines around each frame.
+FRAME_CONTENT_KEYS = ("vars", "pre_context", "context_line", "post_context")
+
+
+def _scrub_stacktrace(stacktrace: Any) -> None:
+    """Keep only code locations in stack frames, with user names removed."""
+    if not isinstance(stacktrace, dict) or not isinstance(stacktrace.get("frames"), list):
+        return
+    for frame in stacktrace["frames"]:
+        if not isinstance(frame, dict):
+            continue
+        for key in FRAME_CONTENT_KEYS:
+            frame.pop(key, None)
+        if isinstance(frame.get("filename"), str):
+            frame["filename"] = sanitize_path(frame["filename"])
+        if isinstance(frame.get("abs_path"), str):
+            frame["abs_path"] = sanitize_path(frame["abs_path"])
+
+
 def scrub_exception_data(exception_data: Dict[str, Any]) -> None:
     """Scrub PII from Sentry exception data in place.
 
-    This modifies the exception data dictionary to sanitize:
-    - File paths in stack traces
-    - Variable values that may contain PII
+    This modifies the exception data dictionary to:
+    - Remove user names from file paths in stack traces
+    - Drop local variable values and source lines from stack frames
+    - Scrub sensitive patterns from exception messages
 
     Args:
         exception_data: The Sentry exception data dictionary.
@@ -348,25 +380,50 @@ def scrub_exception_data(exception_data: Dict[str, Any]) -> None:
         return
 
     for value in exception_data["values"]:
-        # Sanitize stack trace file paths
-        if "stacktrace" in value and "frames" in value["stacktrace"]:
-            for frame in value["stacktrace"]["frames"]:
-                if "filename" in frame:
-                    frame["filename"] = sanitize_path(frame["filename"])
-                if "abs_path" in frame:
-                    frame["abs_path"] = sanitize_path(frame["abs_path"])
-
-                # Scrub local variables if present
-                if "vars" in frame and isinstance(frame["vars"], dict):
-                    frame["vars"] = scrub_dict(frame["vars"], deep=True, scrub_values=True)
+        _scrub_stacktrace(value.get("stacktrace"))
 
         # Scrub exception message for sensitive patterns
         if "value" in value and isinstance(value["value"], str):
             value["value"] = scrub_string(value["value"])
 
 
+# HTTP breadcrumb fields that hold the query string or fragment of a URL.
+URL_DETAIL_KEYS = ("http.query", "http.fragment")
+
+
+# Trace identifiers are random hex. The key-like pattern in SENSITIVE_PATTERNS
+# would replace them, which breaks the link between errors and traces.
+TRACE_CONTEXT_KEYS = ("trace_id", "span_id", "parent_span_id", "dynamic_sampling_context")
+
+
+def _scrub_contexts(contexts: Dict[str, Any]) -> Dict[str, Any]:
+    """Scrub event contexts but keep trace identifiers intact."""
+    scrubbed = scrub_dict(contexts, deep=True, scrub_values=True)
+    trace = contexts.get("trace")
+    if isinstance(trace, dict) and isinstance(scrubbed.get("trace"), dict):
+        for key in TRACE_CONTEXT_KEYS:
+            if key in trace:
+                scrubbed["trace"][key] = trace[key]
+    return scrubbed
+
+
+def _scrub_spans(spans: List[Any]) -> None:
+    """Scrub span descriptions, data and tags in a transaction in place."""
+    for span in spans:
+        if not isinstance(span, dict):
+            continue
+        if isinstance(span.get("description"), str):
+            span["description"] = scrub_string(span["description"])
+        if isinstance(span.get("data"), dict):
+            span["data"] = scrub_dict(span["data"], deep=True, scrub_values=True)
+        if isinstance(span.get("tags"), dict):
+            span["tags"] = _scrub_tags(span["tags"])
+
+
 def create_before_send_filter():
     """Create a before_send filter function for Sentry.
+
+    The same function also serves as ``before_send_transaction``.
 
     Returns:
         A function suitable for use as Sentry's before_send callback.
@@ -376,29 +433,50 @@ def create_before_send_filter():
     def before_send(event: Event, hint: Hint) -> Optional[Event]:
         """Filter and sanitize events before sending to Sentry/GlitchTip."""
         try:
+            # The host name often contains the user's name (for example
+            # "alices-macbook"), so it is never sent.
+            event.pop("server_name", None)
+
             _scrub_top_level_messages(event)
 
             # Scrub exception data
             if "exception" in event:
                 scrub_exception_data(event["exception"])
 
-            # Scrub breadcrumbs
+            # Thread stack traces (attach_stacktrace) get the same treatment.
+            threads = event.get("threads")
+            if isinstance(threads, dict) and isinstance(threads.get("values"), list):
+                for thread in threads["values"]:
+                    if isinstance(thread, dict):
+                        _scrub_stacktrace(thread.get("stacktrace"))
+
+            # Scrub breadcrumbs. Query strings and fragments of HTTP requests
+            # often carry tokens or record IDs, so they are dropped.
             if "breadcrumbs" in event and "values" in event["breadcrumbs"]:
                 for breadcrumb in event["breadcrumbs"]["values"]:
                     if "message" in breadcrumb and isinstance(breadcrumb["message"], str):
                         breadcrumb["message"] = scrub_string(breadcrumb["message"])
                     if "data" in breadcrumb and isinstance(breadcrumb["data"], dict):
-                        breadcrumb["data"] = scrub_dict(
-                            breadcrumb["data"], deep=True, scrub_values=True
-                        )
+                        data = {
+                            k: v
+                            for k, v in breadcrumb["data"].items()
+                            if k not in URL_DETAIL_KEYS
+                        }
+                        breadcrumb["data"] = scrub_dict(data, deep=True, scrub_values=True)
 
-            # Scrub extra data
+            # Scrub extra data. Command-line arguments can name files or carry
+            # user text, so the SDK's sys.argv entry is dropped.
             if "extra" in event and isinstance(event["extra"], dict):
-                event["extra"] = scrub_dict(event["extra"], deep=True, scrub_values=True)
+                extra = {k: v for k, v in event["extra"].items() if k != "sys.argv"}
+                event["extra"] = scrub_dict(extra, deep=True, scrub_values=True)
 
             # Scrub contexts
             if "contexts" in event and isinstance(event["contexts"], dict):
-                event["contexts"] = scrub_dict(event["contexts"], deep=True, scrub_values=True)
+                event["contexts"] = _scrub_contexts(event["contexts"])
+
+            # Scrub transaction spans
+            if isinstance(event.get("spans"), list):
+                _scrub_spans(event["spans"])
 
             # Scrub tags (allowlist + scrub values)
             if "tags" in event and isinstance(event["tags"], dict):
@@ -407,6 +485,8 @@ def create_before_send_filter():
             # Scrub request data (if present)
             if "request" in event and isinstance(event["request"], dict):
                 request = event["request"]
+                request.pop("query_string", None)
+                request.pop("cookies", None)
                 if "headers" in request:
                     if isinstance(request["headers"], dict):
                         request["headers"] = scrub_dict(
