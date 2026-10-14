@@ -32,15 +32,14 @@ Error reports use the Sentry SDK (2.15 or later) and go to the DSN in
 `OPENADAPT_TELEMETRY_DSN`, the config file, or the `dsn` argument of
 `initialize()`. There is no default DSN.
 
-`TelemetryClient.initialize()` sets these SDK options, and callers can't
-weaken them:
+`TelemetryClient.initialize()` sets these SDK options:
 
 | Option | Value |
 |--------|-------|
 | `send_default_pii` | SDK default (off). Passing it is refused with a warning. |
 | `data_collection` | Not set. Passing it is refused with a warning, because newer SDKs let it override `send_default_pii`. |
-| `include_local_variables` | `False` |
-| `include_source_context` | `False` |
+| `include_local_variables` | `False`. A caller can pass `True`, but the filter still removes local variables. |
+| `include_source_context` | `False`. A caller can pass `True`, but the filter still removes source lines. |
 | `before_send`, `before_send_transaction` | The privacy filter. A caller's own hook runs first and the filter runs last. |
 
 If the filter raises, the event is dropped.
