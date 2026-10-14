@@ -144,6 +144,12 @@ def _scrub_top_level_messages(event: Dict[str, Any]) -> None:
             logentry["message"] = scrub_string(logentry["message"])
         if isinstance(logentry.get("formatted"), str):
             logentry["formatted"] = scrub_string(logentry["formatted"])
+        # Arguments of a log call such as logging.error("failed for %s", path).
+        params = logentry.get("params")
+        if isinstance(params, (list, tuple)):
+            logentry["params"] = scrub_list(list(params), scrub_values=True)
+        elif isinstance(params, dict):
+            logentry["params"] = scrub_dict(params, deep=True, scrub_values=True)
 
 
 def _is_safe_tag_key(key: Any) -> bool:
@@ -381,6 +387,10 @@ def scrub_exception_data(exception_data: Dict[str, Any]) -> None:
             value["value"] = scrub_string(value["value"])
 
 
+# HTTP breadcrumb fields that hold the query string or fragment of a URL.
+URL_DETAIL_KEYS = ("http.query", "http.fragment")
+
+
 # Trace identifiers are random hex. The key-like pattern in SENSITIVE_PATTERNS
 # would replace them, which breaks the link between errors and traces.
 TRACE_CONTEXT_KEYS = ("trace_id", "span_id", "parent_span_id", "dynamic_sampling_context")
@@ -440,15 +450,19 @@ def create_before_send_filter():
                     if isinstance(thread, dict):
                         _scrub_stacktrace(thread.get("stacktrace"))
 
-            # Scrub breadcrumbs
+            # Scrub breadcrumbs. Query strings and fragments of HTTP requests
+            # often carry tokens or record IDs, so they are dropped.
             if "breadcrumbs" in event and "values" in event["breadcrumbs"]:
                 for breadcrumb in event["breadcrumbs"]["values"]:
                     if "message" in breadcrumb and isinstance(breadcrumb["message"], str):
                         breadcrumb["message"] = scrub_string(breadcrumb["message"])
                     if "data" in breadcrumb and isinstance(breadcrumb["data"], dict):
-                        breadcrumb["data"] = scrub_dict(
-                            breadcrumb["data"], deep=True, scrub_values=True
-                        )
+                        data = {
+                            k: v
+                            for k, v in breadcrumb["data"].items()
+                            if k not in URL_DETAIL_KEYS
+                        }
+                        breadcrumb["data"] = scrub_dict(data, deep=True, scrub_values=True)
 
             # Scrub extra data. Command-line arguments can name files or carry
             # user text, so the SDK's sys.argv entry is dropped.
@@ -471,6 +485,8 @@ def create_before_send_filter():
             # Scrub request data (if present)
             if "request" in event and isinstance(event["request"], dict):
                 request = event["request"]
+                request.pop("query_string", None)
+                request.pop("cookies", None)
                 if "headers" in request:
                     if isinstance(request["headers"], dict):
                         request["headers"] = scrub_dict(

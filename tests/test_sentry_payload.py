@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 
 import pytest
@@ -100,3 +101,22 @@ def test_transactions_go_through_the_privacy_filter(live_client):
     (span,) = transaction["spans"]
     assert span["data"]["source"] == "/home/<user>/data.csv"
     assert span["data"]["api_key"] == "[REDACTED]"
+
+
+def test_log_arguments_and_url_queries_are_scrubbed(live_client):
+    logging.getLogger("openadapt-test").error(
+        "save failed for %s (%s)", "/Users/alice/out.json", "alice@example.com"
+    )
+    sentry_sdk.add_breadcrumb(
+        type="http",
+        category="httplib",
+        data={"url": "https://emr.example/api/visits", "http.query": "token=abc123"},
+    )
+    live_client.capture_message("after request")
+    sentry_sdk.flush()
+
+    log_event, message_event = _events("event")
+    assert log_event["logentry"]["params"] == ["/Users/<user>/out.json", "[REDACTED]"]
+    assert "alice" not in log_event["logentry"].get("formatted", "")
+    (http,) = [b for b in message_event["breadcrumbs"]["values"] if b.get("type") == "http"]
+    assert http["data"] == {"url": "https://emr.example/api/visits"}
