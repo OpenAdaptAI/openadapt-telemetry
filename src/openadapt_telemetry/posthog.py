@@ -92,10 +92,11 @@ def _normalize_value(value: Any) -> Any:
 
 
 def _sanitize_properties(properties: dict[str, Any] | None) -> dict[str, Any]:
+    """Drop sensitive keys and scrub string values (emails, tokens, home paths)."""
     if not properties:
         return {}
     normalized = {str(k): _normalize_value(v) for k, v in properties.items() if str(k).strip()}
-    redacted = scrub_dict(normalized, deep=True, scrub_values=False)
+    redacted = scrub_dict(normalized, deep=True, scrub_values=True)
     return {k: v for k, v in redacted.items() if v != "[REDACTED]"}
 
 
